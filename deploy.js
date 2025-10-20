@@ -7,7 +7,7 @@ async function deploy() {
     const auth = new google.auth.OAuth2({
       clientId: process.env.OAUTH_CLIENT_ID,
       clientSecret: process.env.OAUTH_CLIENT_SECRET,
-      redirectUri: "http://localhost:3000/oauth2callback"
+      redirectUri: "https://developers.google.com/oauthplayground"
     });
     auth.setCredentials({ refresh_token: process.env.OAUTH_REFRESH_TOKEN });
 
