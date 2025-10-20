@@ -504,43 +504,52 @@ function testAPIv2() {
     console.log('❌ FULL ERROR:', download.getContentText());
   }
 }
-function testMP4Formats() {
-  console.log('🧪 Testing MP4 format availability...');
+function testDynamicAPI() {
+  console.log('🧪 Testing DYNAMIC MP4 v2.4...');
   const API_BASE_URL = 'https://yt-downloader-api-2rhl.onrender.com';
   
+  // 1. Health
+  const health = UrlFetchApp.fetch(`${API_BASE_URL}/health`);
+  console.log('🏥 Health:', health.getContentText().substring(0, 100));
+  
+  // 2. Info (shows MP4 count)
   const infoUrl = `${API_BASE_URL}/info?url=https://www.youtube.com/watch?v=dQw4w9WgXcQ`;
   const infoResp = UrlFetchApp.fetch(infoUrl);
   const info = JSON.parse(infoResp.getContentText());
+  console.log('📊 MP4 Formats:', info.mp4_formats);
   
-  console.log('📊 MP4 Info:');
-  console.log('  Title:', info.title?.substring(0, 40));
-  console.log('  MP4 formats:', info.mp4_formats_available);
-  console.log('  Sample formats:', JSON.stringify(info.sample_formats, null, 2));
-  console.log('  Can download:', info.can_download);
-}
-function testMP4Download() {
-  console.log('⬇️ Testing MP4 download...');
-  const API_BASE_URL = 'https://yt-downloader-api-2rhl.onrender.com';
+  // 3. Download
+  console.log('⬇️ Dynamic download (30-60s)...');
+  const start = new Date().getTime();
   
   const download = UrlFetchApp.fetch(`${API_BASE_URL}/download`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     payload: JSON.stringify({ 
       url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', 
-      resolution: '360p' 
+      resolution: '720p'  // Try highest first
     }),
     muteHttpExceptions: true
   });
   
-  console.log('📥 MP4 Result:');
+  const duration = ((new Date().getTime() - start) / 1000).toFixed(1);
+  console.log(`⏱️ Duration: ${duration}s`);
+  
+  console.log('📥 Result:');
   console.log('  Status:', download.getResponseCode());
   console.log('  Content-Type:', download.getHeaders()['Content-Type']);
   console.log('  Size:', (download.getBlob().getBytes().length / (1024*1024)).toFixed(1) + 'MB');
   
-  if (download.getResponseCode() === 200 && download.getHeaders()['Content-Type'] === 'video/mp4') {
-    const videoBlob = download.getBlob().setName('rickroll_mp4.mp4');
-    const file = DriveApp.createFile(videoBlob);
-    console.log('✅ MP4 SAVED:', file.getUrl());
+  if (download.getResponseCode() === 200) {
+    const headers = download.getHeaders();
+    if (headers['Content-Type']?.startsWith('video/')) {
+      const videoBlob = download.getBlob().setName('dynamic_rickroll.mp4');
+      const file = DriveApp.createFile(videoBlob);
+      console.log('✅ VIDEO SAVED:', file.getUrl());
+      console.log('🎬 Should play Rick Astley!');
+    } else {
+      console.log('❌ Not video content:', headers['Content-Type']);
+    }
   } else {
     console.log('❌ Error:', download.getContentText());
   }
