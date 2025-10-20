@@ -149,3 +149,32 @@ function test2_videoInfo_FIXED() {
     }
   }
 }
+function test2_videoInfo_v2() {
+  const url = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+  const response = UrlFetchApp.fetch(
+    `${API_BASE_URL}/info?url=${encodeURIComponent(url)}`,
+    { muteHttpExceptions: true }
+  );
+  
+  console.log('🔍 Status:', response.getResponseCode());
+  console.log('📄 Response:', response.getContentText());
+  
+  if (response.getResponseCode() === 200) {
+    try {
+      const data = JSON.parse(response.getContentText());
+      if (data.success) {
+        console.log('🎉 ✅ API FIXED!');
+        console.log('📹 Title:', data.title);
+        console.log('👤 Author:', data.author);
+        console.log('⏱️ Duration:', data.duration);
+        return data;
+      } else {
+        console.log('❌ API returned error:', data.error);
+      }
+    } catch (e) {
+      console.log('❌ JSON parse error:', e);
+    }
+  } else {
+    console.log('❌ HTTP Error:', response.getResponseCode());
+  }
+}
