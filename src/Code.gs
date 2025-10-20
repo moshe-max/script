@@ -96,7 +96,7 @@ function testApiHealth() {
   try {
         // Make a POST request with a JSON payload.
     const data = {
-      url = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+      url = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
     };
     const options = {
       method: 'post',
