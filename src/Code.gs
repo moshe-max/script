@@ -130,3 +130,22 @@ function test2_videoInfo_DEBUG() {
     console.error('❌ FAILED - Full error above');
   }
 }
+function test2_videoInfo_FIXED() {
+  const url = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+  const response = UrlFetchApp.fetch(
+    `${API_BASE_URL}/info?url=${encodeURIComponent(url)}`, 
+    { muteHttpExceptions: true }
+  );
+  
+  console.log('Status:', response.getResponseCode());
+  console.log('Response:', response.getContentText());
+  
+  if (response.getResponseCode() === 200) {
+    const data = JSON.parse(response.getContentText());
+    if (data.success) {
+      console.log('✅ FIXED! Title:', data.title);
+    } else {
+      console.log('❌ Still error:', data.error);
+    }
+  }
+}
