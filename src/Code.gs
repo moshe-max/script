@@ -504,3 +504,44 @@ function testAPIv2() {
     console.log('❌ FULL ERROR:', download.getContentText());
   }
 }
+function testMP4Formats() {
+  console.log('🧪 Testing MP4 format availability...');
+  const API_BASE_URL = 'https://yt-downloader-api-2rhl.onrender.com';
+  
+  const infoUrl = `${API_BASE_URL}/info?url=https://www.youtube.com/watch?v=dQw4w9WgXcQ`;
+  const infoResp = UrlFetchApp.fetch(infoUrl);
+  const info = JSON.parse(infoResp.getContentText());
+  
+  console.log('📊 MP4 Info:');
+  console.log('  Title:', info.title?.substring(0, 40));
+  console.log('  MP4 formats:', info.mp4_formats_available);
+  console.log('  Sample formats:', JSON.stringify(info.sample_formats, null, 2));
+  console.log('  Can download:', info.can_download);
+}
+function testMP4Download() {
+  console.log('⬇️ Testing MP4 download...');
+  const API_BASE_URL = 'https://yt-downloader-api-2rhl.onrender.com';
+  
+  const download = UrlFetchApp.fetch(`${API_BASE_URL}/download`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    payload: JSON.stringify({ 
+      url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', 
+      resolution: '360p' 
+    }),
+    muteHttpExceptions: true
+  });
+  
+  console.log('📥 MP4 Result:');
+  console.log('  Status:', download.getResponseCode());
+  console.log('  Content-Type:', download.getHeaders()['Content-Type']);
+  console.log('  Size:', (download.getBlob().getBytes().length / (1024*1024)).toFixed(1) + 'MB');
+  
+  if (download.getResponseCode() === 200 && download.getHeaders()['Content-Type'] === 'video/mp4') {
+    const videoBlob = download.getBlob().setName('rickroll_mp4.mp4');
+    const file = DriveApp.createFile(videoBlob);
+    console.log('✅ MP4 SAVED:', file.getUrl());
+  } else {
+    console.log('❌ Error:', download.getContentText());
+  }
+}
