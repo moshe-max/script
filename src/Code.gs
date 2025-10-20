@@ -94,7 +94,7 @@ function processYtEmails() {
 
 function testApiHealth() {
   try {
-    const response = UrlFetchApp.fetch(`${API_BASE_URL}/info?url=${encodeURIComponent('https://www.youtube.com/watch?v=dQw4w9WgXcQ')}`, {
+    const response = UrlFetchApp.fetch(`${API_BASE_URL}/video_info?url=${encodeURIComponent('https://www.youtube.com/watch?v=dQw4w9WgXcQ')}`, {
       headers: { 'User-Agent': 'Mozilla/5.0' },
       muteHttpExceptions: true
     });
