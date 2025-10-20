@@ -424,17 +424,18 @@ function testSingleDownload() {
     console.error('❌ DOWNLOAD FAILED:', e);
   }
 }
-function testStealthAPI() {
-  console.log('🧪 Testing STEALTH v2.6...');
+function testLightweightAPI() {
+  console.log('🧪 Testing LIGHTWEIGHT v2.7...');
   const API_BASE_URL = 'https://yt-downloader-api-2rhl.onrender.com';
   
-  // 1. Health check
-  const health = UrlFetchApp.fetch(`${API_BASE_URL}/health`);
-  console.log('🏥 Health:', JSON.parse(health.getContentText()).message);
+  // Health check
+  const healthResp = UrlFetchApp.fetch(`${API_BASE_URL}/health`);
+  const health = JSON.parse(healthResp.getContentText());
+  console.log('🏥 Health:', health.message);
   
-  // 2. Test download with longer timeout
-  console.log('⬇️ Stealth download (60-120s)...');
-  const start = new Date().getTime();
+  // Download (may take 2-5 minutes with retries)
+  console.log('⬇️ Lightweight download (120-300s)...');
+  const startTime = new Date().getTime();
   
   const download = UrlFetchApp.fetch(`${API_BASE_URL}/download`, {
     method: 'POST',
@@ -443,31 +444,34 @@ function testStealthAPI() {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     },
     payload: JSON.stringify({ 
-      url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' 
+      url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'  // Rick Astley
     }),
     muteHttpExceptions: true
   });
   
-  const duration = ((new Date().getTime() - start) / 1000).toFixed(1);
-  console.log(`⏱️ Duration: ${duration}s`);
+  const duration = ((new Date().getTime() - startTime) / 1000).toFixed(1);
+  console.log(`⏱️ Total time: ${duration}s`);
   
-  console.log('📥 Stealth Result:');
+  console.log('📥 Result:');
   console.log('  Status:', download.getResponseCode());
-  console.log('  Content-Type:', download.getHeaders()['Content-Type']);
+  console.log('  Content-Type:', download.getHeaders()['Content-Type'] || 'none');
   console.log('  Size:', (download.getBlob().getBytes().length / (1024*1024)).toFixed(1) + 'MB');
   
   if (download.getResponseCode() === 200) {
     const contentType = download.getHeaders()['Content-Type'];
     if (contentType && contentType.startsWith('video/')) {
-      const videoBlob = download.getBlob().setName('stealth_rickroll.mp4');
+      const videoBlob = download.getBlob().setName('lightweight_rickroll.mp4');
       const file = DriveApp.createFile(videoBlob);
-      console.log('✅ 🎵 STEALTH VIDEO SAVED:', file.getUrl());
+      console.log('✅ 🎵 VIDEO SAVED:', file.getUrl());
+      console.log('🎬 Should play Rick Astley in 720p!');
       return file.getUrl();
     } else {
-      console.log('❌ Not video:', contentType);
+      console.log('❌ Not video content:', contentType);
+      console.log('❌ Response:', download.getContentText());
     }
+  } else {
+    console.log('❌ ERROR:', download.getContentText());
   }
   
-  console.log('❌ ERROR:', download.getContentText());
   return null;
 }
