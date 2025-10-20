@@ -424,24 +424,26 @@ function testSingleDownload() {
     console.error('❌ DOWNLOAD FAILED:', e);
   }
 }
-function testUniversalAPI() {
-  console.log('🧪 Testing UNIVERSAL v2.5...');
+function testStealthAPI() {
+  console.log('🧪 Testing STEALTH v2.6...');
   const API_BASE_URL = 'https://yt-downloader-api-2rhl.onrender.com';
   
-  // Quick health check
+  // 1. Health check
   const health = UrlFetchApp.fetch(`${API_BASE_URL}/health`);
-  console.log('🏥 Health OK');
+  console.log('🏥 Health:', JSON.parse(health.getContentText()).message);
   
-  // Download (handles DASH automatically)
-  console.log('⬇️ Universal download (30-90s)...');
+  // 2. Test download with longer timeout
+  console.log('⬇️ Stealth download (60-120s)...');
   const start = new Date().getTime();
   
   const download = UrlFetchApp.fetch(`${API_BASE_URL}/download`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 
+      'Content-Type': 'application/json',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    },
     payload: JSON.stringify({ 
-      url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', 
-      resolution: '720p' 
+      url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' 
     }),
     muteHttpExceptions: true
   });
@@ -449,7 +451,7 @@ function testUniversalAPI() {
   const duration = ((new Date().getTime() - start) / 1000).toFixed(1);
   console.log(`⏱️ Duration: ${duration}s`);
   
-  console.log('📥 Result:');
+  console.log('📥 Stealth Result:');
   console.log('  Status:', download.getResponseCode());
   console.log('  Content-Type:', download.getHeaders()['Content-Type']);
   console.log('  Size:', (download.getBlob().getBytes().length / (1024*1024)).toFixed(1) + 'MB');
@@ -457,16 +459,15 @@ function testUniversalAPI() {
   if (download.getResponseCode() === 200) {
     const contentType = download.getHeaders()['Content-Type'];
     if (contentType && contentType.startsWith('video/')) {
-      const videoBlob = download.getBlob().setName('universal_rickroll.mp4');
+      const videoBlob = download.getBlob().setName('stealth_rickroll.mp4');
       const file = DriveApp.createFile(videoBlob);
-      console.log('✅ 🎵 VIDEO SAVED:', file.getUrl());
-      console.log('🎬 Open → Rick Astley should play!');
+      console.log('✅ 🎵 STEALTH VIDEO SAVED:', file.getUrl());
       return file.getUrl();
     } else {
       console.log('❌ Not video:', contentType);
     }
   }
   
-  console.log('❌ FULL ERROR:', download.getContentText());
+  console.log('❌ ERROR:', download.getContentText());
   return null;
 }
