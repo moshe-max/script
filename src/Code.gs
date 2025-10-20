@@ -356,3 +356,207 @@ function escapeHtml(text) {
   const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;', '\n': '<br>' };
   return text.toString().replace(/[&<>"'\n]/g, m => map[m]);
 }
+// ================================
+// 🧪 QUICK TESTS - ADD THESE
+// ================================
+
+/**
+ * 🧪 TEST 1: API Health Check
+ */
+function testAPIHealth() {
+  console.log('🏥 Testing API Health...');
+  
+  try {
+    const response = UrlFetchApp.fetch(`${API_BASE_URL}/health`, {
+      muteHttpExceptions: true
+    });
+    
+    console.log('📊 Response:');
+    console.log('  Status:', response.getResponseCode());
+    console.log('  Body:', response.getContentText());
+    
+    if (response.getResponseCode() === 200) {
+      console.log('✅ API IS LIVE!');
+      return true;
+    } else {
+      console.log('❌ API DOWN');
+      return false;
+    }
+  } catch (error) {
+    console.log('❌ API Error:', error);
+    return false;
+  }
+}
+
+/**
+ * 🧪 TEST 2: Video Info
+ */
+function testVideoInfo() {
+  console.log('📊 Testing Video Info...');
+  
+  const testUrl = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+  
+  try {
+    const response = UrlFetchApp.fetch(
+      `${API_BASE_URL}/info?url=${encodeURIComponent(testUrl)}`,
+      { muteHttpExceptions: true }
+    );
+    
+    console.log('📊 Info Response:');
+    console.log('  Status:', response.getResponseCode());
+    
+    if (response.getResponseCode() === 200) {
+      const info = JSON.parse(response.getContentText());
+      console.log('✅ VIDEO INFO OK:');
+      console.log(`  Title: ${info.title}`);
+      console.log(`  Author: ${info.author}`);
+      console.log(`  Duration: ${info.length}s`);
+      return true;
+    } else {
+      console.log('❌ Info failed:', response.getContentText());
+      return false;
+    }
+  } catch (error) {
+    console.log('❌ Info Error:', error);
+    return false;
+  }
+}
+
+/**
+ * 🧪 TEST 3: Full Download
+ */
+function testFullDownload() {
+  console.log('⬇️ Testing FULL DOWNLOAD...');
+  
+  const testUrl = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+  const startTime = new Date().getTime();
+  
+  try {
+    const response = UrlFetchApp.fetch(`${API_BASE_URL}/download`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      payload: JSON.stringify({ 
+        url: testUrl, 
+        resolution: DEFAULT_RESOLUTION 
+      }),
+      muteHttpExceptions: true
+    });
+    
+    const duration = ((new Date().getTime() - startTime) / 1000).toFixed(1);
+    
+    console.log('📥 DOWNLOAD RESULT:');
+    console.log('  Status:', response.getResponseCode());
+    console.log('  Duration:', duration + 's');
+    console.log('  Content-Type:', response.getHeaders()['Content-Type'] || 'none');
+    console.log('  Size:', (response.getBlob().getBytes().length / (1024*1024)).toFixed(1) + 'MB');
+    
+    if (response.getResponseCode() === 200) {
+      const contentType = response.getHeaders()['Content-Type'];
+      if (contentType && contentType.startsWith('video/')) {
+        const blob = response.getBlob().setName('test_rickroll.mp4');
+        const file = DriveApp.createFile(blob);
+        console.log('✅ 🎵 VIDEO SAVED TO DRIVE:', file.getUrl());
+        console.log('🎬 Open link → Should play Rick Astley!');
+        return file.getUrl();
+      } else {
+        console.log('❌ Not video content:', contentType);
+        console.log('❌ Response:', response.getContentText());
+      }
+    } else {
+      console.log('❌ ERROR:', response.getContentText());
+    }
+    
+    return null;
+  } catch (error) {
+    console.log('❌ Download Error:', error);
+    return null;
+  }
+}
+
+/**
+ * 🧪 TEST 4: MASTER TEST (All 3 tests)
+ */
+function testEverything() {
+  console.log('🚀 MASTER TEST SUITE');
+  console.log('===================');
+  
+  let allPassed = true;
+  
+  // Test 1: Health
+  console.log('\n1️⃣ HEALTH CHECK...');
+  const healthOk = testAPIHealth();
+  allPassed = allPassed && healthOk;
+  
+  // Test 2: Info
+  console.log('\n2️⃣ VIDEO INFO...');
+  const infoOk = testVideoInfo();
+  allPassed = allPassed && infoOk;
+  
+  // Test 3: Download (takes 1-2 min)
+  console.log('\n3️⃣ FULL DOWNLOAD...');
+  console.log('⏳ This takes 60-120 seconds...');
+  const downloadUrl = testFullDownload();
+  const downloadOk = !!downloadUrl;
+  allPassed = allPassed && downloadOk;
+  
+  // Results
+  console.log('\n===================');
+  console.log('📊 FINAL RESULTS:');
+  console.log(`  Health: ${healthOk ? '✅' : '❌'}`);
+  console.log(`  Info: ${infoOk ? '✅' : '❌'}`);
+  console.log(`  Download: ${downloadOk ? '✅' : '❌'}`);
+  console.log(`  ALL PASS: ${allPassed ? '✅' : '❌'}`);
+  
+  if (downloadUrl) {
+    console.log('\n🎉 SUCCESS! Your API is READY for emails!');
+    console.log('📧 Now send test email with subject "yt"');
+  } else {
+    console.log('\n⚠️ API NOT READY - Check Render logs');
+  }
+  
+  return { allPassed, healthOk, infoOk, downloadOk, downloadUrl };
+}
+
+/**
+ * 🧪 TEST 5: Send Test Email + Process
+ */
+function testEmailFlow() {
+  console.log('📧 Testing FULL EMAIL FLOW...');
+  
+  // 1. Send test email to yourself
+  const testBody = `
+    Test YouTube download:
+    
+    https://www.youtube.com/watch?v=dQw4w9WgXcQ
+    
+    Subject must be exactly "yt"
+  `;
+  
+  GmailApp.sendEmail(
+    Session.getActiveUser().getEmail(),
+    'yt',  // ← EXACTLY "yt"
+    testBody,
+    { htmlBody: testBody.replace(/\n/g, '<br>') }
+  );
+  
+  console.log('✅ Test email SENT with subject "yt"');
+  console.log('⏳ Waiting 5s for Gmail to process...');
+  Utilities.sleep(5000);
+  
+  // 2. Process emails
+  console.log('🔄 Running processYtEmails()...');
+  const results = processYtEmails();
+  
+  // 3. Show results
+  console.log('\n📊 EMAIL PROCESS RESULTS:');
+  results.forEach((result, i) => {
+    if (result.success) {
+      console.log(`✅ ${i+1}. SUCCESS: ${result.info?.title}`);
+    } else {
+      console.log(`❌ ${i+1}. FAILED: ${result.error || result.reason}`);
+    }
+  });
+  
+  console.log('\n🎉 EMAIL FLOW TEST COMPLETE!');
+  return results;
+}
