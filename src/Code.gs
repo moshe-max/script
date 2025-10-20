@@ -460,22 +460,24 @@ function debugMIMEStructure() {
   console.log(`\n💾 RAW MIME SAVED: ${debugFile.getUrl()}`);
   console.log('📋 Open in Drive → Download → Open with text editor');
 }
-function testFixedAPI() {
-  console.log('🧪 Testing FIXED API...');
+function testAPIv2() {
+  console.log('🧪 Testing API v2.2...');
   const API_BASE_URL = 'https://yt-downloader-api-2rhl.onrender.com';
   
-  // 1. Health check
+  // 1. Health
   const health = UrlFetchApp.fetch(`${API_BASE_URL}/health`);
-  console.log('🏥 Health:', health.getResponseCode(), health.getContentText().substring(0, 100));
+  console.log('🏥 Health:', health.getContentText());
   
   // 2. Info
   const infoUrl = `${API_BASE_URL}/info?url=https://www.youtube.com/watch?v=dQw4w9WgXcQ`;
   const infoResp = UrlFetchApp.fetch(infoUrl);
   const info = JSON.parse(infoResp.getContentText());
-  console.log('📊 Info:', info.success, info.title?.substring(0, 30), info.can_download);
+  console.log('📊 Info:', info.title?.substring(0, 30), info.can_download);
   
-  // 3. Download
-  console.log('⬇️ Testing download...');
+  // 3. Download with timeout
+  console.log('⬇️ Downloading (may take 30-60s)...');
+  const startTime = new Date().getTime();
+  
   const download = UrlFetchApp.fetch(`${API_BASE_URL}/download`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -486,17 +488,19 @@ function testFixedAPI() {
     muteHttpExceptions: true
   });
   
-  console.log('📥 Download result:');
+  const duration = ((new Date().getTime() - startTime) / 1000).toFixed(1);
+  console.log(`⏱️ Duration: ${duration}s`);
+  
+  console.log('📥 Result:');
   console.log('  Status:', download.getResponseCode());
   console.log('  Content-Type:', download.getHeaders()['Content-Type'] || 'unknown');
   console.log('  Size:', (download.getBlob().getBytes().length / (1024*1024)).toFixed(1) + 'MB');
   
   if (download.getResponseCode() === 200) {
-    const videoBlob = download.getBlob().setName('rickroll_test.mp4');
+    const videoBlob = download.getBlob().setName('rickroll_v2.mp4');
     const file = DriveApp.createFile(videoBlob);
     console.log('✅ VIDEO SAVED:', file.getUrl());
-    console.log('🎬 Open → Should play Rick Astley!');
   } else {
-    console.log('❌ Error:', download.getContentText());
+    console.log('❌ FULL ERROR:', download.getContentText());
   }
 }
