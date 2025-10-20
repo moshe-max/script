@@ -94,10 +94,17 @@ function processYtEmails() {
 
 function testApiHealth() {
   try {
-    const response = UrlFetchApp.fetch(`${API_BASE_URL}/video_info?url=${encodeURIComponent('https://www.youtube.com/watch?v=dQw4w9WgXcQ')}`, {
-      headers: { 'User-Agent': 'Mozilla/5.0' },
-      muteHttpExceptions: true
-    });
+        // Make a POST request with a JSON payload.
+    const data = {
+      url = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+    };
+    const options = {
+      method: 'post',
+      contentType: 'application/json',
+      // Convert the JavaScript object to a JSON string.
+      payload: JSON.stringify(data),
+    };
+    const response = UrlFetchApp.fetch('https://yt-downloader-api-2rhl.onrender.com/video_info',options);
     
     if (response.getResponseCode() === 200) {
       const data = JSON.parse(response.getContentText());
