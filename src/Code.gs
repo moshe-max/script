@@ -178,3 +178,25 @@ function test2_videoInfo_v2() {
     console.log('❌ HTTP Error:', response.getResponseCode());
   }
 }
+function test2_yt_dlp() {
+  const url = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+  const response = UrlFetchApp.fetch(
+    `${API_BASE_URL}/info?url=${encodeURIComponent(url)}`,
+    { muteHttpExceptions: true }
+  );
+  
+  console.log('Status:', response.getResponseCode());
+  console.log('Response:', response.getContentText());
+  
+  if (response.getResponseCode() === 200) {
+    const data = JSON.parse(response.getContentText());
+    if (data.success) {
+      console.log('🎉 🎉 YT-DLP FIXED EVERYTHING!');
+      console.log('📹', data.title);
+      console.log('👤', data.author);
+      console.log('⏱️', data.duration);
+      return data;
+    }
+  }
+  console.log('❌ Still failing');
+}
