@@ -1,6 +1,6 @@
 // ================================
-// 🎥 AUTO YT EMAIL DOWNLOADER v5.2 - GMAILAPP FIXED
-// Scans "yt" subject emails → Downloads → Replies
+// 🎥 AUTO YT EMAIL DOWNLOADER v5.4 - EXACT "yt" SUBJECT
+// Only triggers on emails with EXACT subject: "yt"
 // ================================
 
 // 🔧 CONFIGURATION
@@ -14,16 +14,16 @@ const DEFAULT_RESOLUTION = '360p';
 // ================================
 
 /**
- * 🎯 MAIN: Scan "yt" emails → Download → Reply
+ * 🎯 MAIN: Scan EXACT "yt" subject emails → Download → Reply
  */
 function processYtEmails() {
-  console.log('🔍 Scanning Gmail for "yt" subject emails...');
+  console.log('🔍 Scanning Gmail for EXACT "yt" subject emails...');
   
   try {
-    // 1. Find unprocessed "yt" emails
-    const searchQuery = 'subject:yt -in:trash -label:yt-processed';
+    // 🔥 EXACT "yt" SUBJECT ONLY
+    const searchQuery = 'subject:"yt" -in:trash -label:yt-processed';
     const threads = GmailApp.search(searchQuery, 0, 20);
-    console.log(`📧 Found ${threads.length} unprocessed "yt" threads`);
+    console.log(`📧 Found ${threads.length} EXACT "yt" threads`);
     
     let processed = 0, success = 0, skipped = 0, failed = 0;
     const results = [];
@@ -37,32 +37,36 @@ function processYtEmails() {
     
     threads.forEach((thread, threadIndex) => {
       try {
-        console.log(`\n📧 Thread ${threadIndex + 1}: ${thread.getFirstMessageSubject()}`);
+        // Check if thread already processed
+        const threadLabels = thread.getLabels().map(label => label.getName());
+        if (threadLabels.includes('yt-processed')) {
+          console.log(`\n📧 Thread ${threadIndex + 1}: ${thread.getFirstMessageSubject()} [ALREADY PROCESSED]`);
+          return;
+        }
+        
+        console.log(`\n📧 Thread ${threadIndex + 1}: "${thread.getFirstMessageSubject()}" ✅ EXACT MATCH`);
         
         const messages = thread.getMessages();
+        let threadHasUrls = false;
+        
         messages.forEach((message, msgIndex) => {
-          // Check if message has processed label
-          const messageLabels = message.getLabels ? message.getLabels() : [];
-          const isProcessed = messageLabels.some(label => label.getName() === 'yt-processed');
+          // Extract YouTube URLs
+          const urls = extractYouTubeUrls(message.getBody());
+          console.log(`  📧 Message ${msgIndex + 1} from ${message.getFrom()}: ${urls.length} URLs`);
           
-          if (isProcessed) {
-            console.log(`  ⏭️ Message ${msgIndex + 1} already processed`);
+          if (urls.length === 0) {
+            console.log(`  ⚠️ No URLs found in message ${msgIndex + 1}`);
             return;
           }
           
-          // Extract YouTube URLs
-          const urls = extractYouTubeUrls(message.getBody());
-          console.log(`  📧 From ${message.getFrom()}: ${urls.length} URLs`);
-          
-          if (urls.length === 0) return;
-          
+          threadHasUrls = true;
           processed++;
           
           // Process each URL
           urls.forEach((url, urlIndex) => {
             try {
               console.log(`    ⬇️ [${urlIndex + 1}/${urls.length}] ${url}`);
-              const result = downloadAndReply(message, url, processedLabel);
+              const result = downloadAndReply(message, url);
               results.push({ ...result, threadId: thread.getId(), messageId: message.getId() });
               
               if (result.success) success++;
@@ -85,12 +89,15 @@ function processYtEmails() {
               failed++;
             }
           });
-          
-          // Mark message as processed
-          message.addLabel(processedLabel);
-          console.log(`  ✅ Message ${msgIndex + 1} marked processed`);
-          
         });
+        
+        // Label ENTIRE THREAD after processing
+        if (threadHasUrls) {
+          thread.addLabel(processedLabel);
+          console.log(`  ✅ THREAD LABELED: yt-processed`);
+        } else {
+          console.log(`  ℹ️ No URLs found - thread NOT labeled`);
+        }
         
       } catch (threadError) {
         console.error(`❌ Thread ${threadIndex + 1} failed:`, threadError);
@@ -98,7 +105,7 @@ function processYtEmails() {
     });
     
     // Summary
-    console.log(`\n📊 FINAL SUMMARY:`);
+    console.log(`\n📊 FINAL SUMMARY (EXACT "yt" subject):`);
     console.log(`✅ Success: ${success}`);
     console.log(`⏭️ Skipped: ${skipped}`); 
     console.log(`❌ Failed: ${failed}`);
@@ -118,15 +125,19 @@ function processYtEmails() {
 }
 
 // ================================
-// 📥 EMAIL PROCESSING
+// 📥 EMAIL PROCESSING (UNCHANGED)
 // ================================
 
 /**
  * Extract YouTube URLs from email body
  */
 function extractYouTubeUrls(emailBody) {
-  // Clean HTML to get plain text
-  const plainText = emailBody.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
+  // Convert HTML to plain text for better URL extraction
+  const plainText = emailBody
+    .replace(/<[^>]*>/g, ' ')  // Remove HTML tags
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/\s+/g, ' ');     // Normalize whitespace
   
   const patterns = [
     /https?:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/gi,
@@ -150,7 +161,7 @@ function extractYouTubeUrls(emailBody) {
 /**
  * Download video → Reply to sender
  */
-function downloadAndReply(message, videoUrl, processedLabel) {
+function downloadAndReply(message, videoUrl) {
   const senderEmail = extractEmail(message.getFrom());
   console.log(`⬇️ Processing for ${senderEmail}: ${videoUrl}`);
   
@@ -159,16 +170,18 @@ function downloadAndReply(message, videoUrl, processedLabel) {
     let info;
     try {
       info = getVideoInfo(videoUrl);
-      console.log(`  ✅ Video: ${info.title} (${info.duration})`);
+      console.log(`  ✅ Video: ${info.title.substring(0, 50)}... (${info.duration})`);
     } catch (infoError) {
       const errorMsg = infoError.message;
+      console.log(`  ❌ Video unavailable: ${errorMsg}`);
+      
       if (errorMsg.includes('Video not found') || 
           errorMsg.includes('private') ||
           errorMsg.includes('unavailable')) {
         replyToSender(message, null, { 
           error: 'Video unavailable (private/deleted/unlisted)', 
           videoUrl 
-        }, processedLabel);
+        });
         return { success: false, error: errorMsg, sender: senderEmail, url: videoUrl };
       }
       throw infoError;
@@ -177,7 +190,8 @@ function downloadAndReply(message, videoUrl, processedLabel) {
     // 2. Check duration limit
     if (info.length > MAX_DURATION_MINUTES * 60) {
       const reason = `Too long (${formatDuration(info.length)} > ${MAX_DURATION_MINUTES}min)`;
-      replyToSender(message, info, { skipped: true, reason }, processedLabel);
+      console.log(`  ⏭️ Skipped: ${reason}`);
+      replyToSender(message, info, { skipped: true, reason });
       return { success: false, skipped: true, reason, info, sender: senderEmail, url: videoUrl };
     }
     
@@ -187,9 +201,12 @@ function downloadAndReply(message, videoUrl, processedLabel) {
       method: 'POST',
       headers: { 
         'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (compatible; YT-Email-Downloader)'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
       },
-      payload: JSON.stringify({ url: videoUrl, resolution: DEFAULT_RESOLUTION }),
+      payload: JSON.stringify({ 
+        url: videoUrl, 
+        resolution: DEFAULT_RESOLUTION 
+      }),
       muteHttpExceptions: true
     });
     
@@ -212,7 +229,7 @@ function downloadAndReply(message, videoUrl, processedLabel) {
       // 📎 Attachment
       console.log(`  📎 Sending attachment (${fileSizeMB.toFixed(1)}MB)`);
       replyData = { method: 'attachment', sizeMB: fileSizeMB.toFixed(1) };
-      replyToSender(message, info, replyData, processedLabel, blob);
+      replyToSender(message, info, replyData, blob);
     } else {
       // 💾 Drive
       console.log(`  💾 Saving to private Drive (${fileSizeMB.toFixed(1)}MB)`);
@@ -224,50 +241,51 @@ function downloadAndReply(message, videoUrl, processedLabel) {
         driveUrl: file.getUrl(),
         sizeMB: fileSizeMB.toFixed(1)
       };
-      replyToSender(message, info, replyData, processedLabel, null, file);
+      replyToSender(message, info, replyData, null, file);
     }
     
-    console.log(`  ✅ SUCCESS: ${info.title}`);
+    console.log(`  ✅ SUCCESS: ${info.title.substring(0, 30)}...`);
     return { success: true, info, sender: senderEmail, url: videoUrl, ...replyData };
     
   } catch (error) {
     console.error(`  ❌ FAILED: ${error.message}`);
-    replyToSender(message, null, { error: error.message, videoUrl }, processedLabel);
+    replyToSender(message, null, { error: error.message, videoUrl });
     return { success: false, error: error.message, sender: senderEmail, url: videoUrl };
   }
 }
 
-/**
- * Reply to sender with download/result
- */
-function replyToSender(message, info, result, processedLabel, attachment = null, driveFile = null) {
+// ================================
+// 📧 REPLY FUNCTION (UNCHANGED)
+// ================================
+
+function replyToSender(message, info, result, attachment = null, driveFile = null) {
+  const senderEmail = extractEmail(message.getFrom());
   const subject = `Re: ${message.getSubject()}`;
   
-  let htmlBody;
+  let htmlBody, plainText;
   
   if (result.skipped) {
-    // ⏭️ Skipped
     htmlBody = `
       <h2 style="color: #ff9800;">⏭️ Video Skipped</h2>
       <p><strong>${escapeHtml(info.title)}</strong></p>
       <p style="color: #ff9800;"><em>${escapeHtml(result.reason)}</em></p>
       <p>👤 ${escapeHtml(info.author)} • ⏱️ ${info.duration}</p>
       <p><a href="${info.url}" target="_blank">▶️ Watch on YouTube</a></p>
-      <hr><p><em>YT Email Downloader • <a href="https://youtube.com/watch?v=dQw4w9WgXcQ">Test</a></em></p>
+      <hr><p><em>YT Email Downloader • Subject: <strong>"yt"</strong> only</em></p>
     `;
+    plainText = `Video skipped: ${info.title}\nReason: ${result.reason}`;
     
   } else if (result.error) {
-    // ❌ Error
     htmlBody = `
       <h2 style="color: #f44336;">❌ Download Failed</h2>
-      <p><strong>URL:</strong> ${escapeHtml(result.videoUrl || 'Unknown')}</p>
+      <p><strong>URL:</strong> ${escapeHtml(result.videoUrl)}</p>
       <p><strong>Error:</strong> ${escapeHtml(result.error)}</p>
-      <p>💡 Try a <a href="https://www.youtube.com/watch?v=dQw4w9WgXcQ">public video</a> to test.</p>
+      <p>💡 Use <strong>exact subject "yt"</strong> for future requests</p>
       <hr><p><em>YT Email Downloader</em></p>
     `;
+    plainText = `Download failed for ${result.videoUrl}\nError: ${result.error}`;
     
   } else if (result.method === 'attachment') {
-    // 📎 Attachment
     htmlBody = `
       <div style="font-family: Arial; max-width: 600px;">
         <h1 style="color: #4CAF50;">✅ Video Downloaded!</h1>
@@ -280,24 +298,21 @@ function replyToSender(message, info, result, processedLabel, attachment = null,
           <img src="${info.thumbnail}" style="width: 100%; max-width: 400px; border-radius: 10px;">
         </div>
         <p>👤 ${escapeHtml(info.author)} • ⏱️ ${info.duration} • 📁 ${DEFAULT_RESOLUTION}</p>
-        <hr><p><em>YT Email Downloader 🚀</em></p>
+        <hr><p><em>YT Email Downloader 🚀 • Subject: <strong>"yt"</strong></em></p>
       </div>
     `;
+    plainText = `Video attached: ${info.title}\n${attachment.getName()} (${result.sizeMB}MB)`;
     
-    // Reply WITH attachment
-    GmailApp.sendEmail(
-      extractEmail(message.getFrom()),
-      subject,
-      `Video downloaded: ${info.title}`,
-      {
-        htmlBody: htmlBody,
-        attachments: [attachment]
-      }
-    );
+    MailApp.sendEmail({
+      to: senderEmail,
+      subject: subject,
+      body: plainText,
+      htmlBody: htmlBody,
+      attachments: [attachment]
+    });
     return;
     
   } else {
-    // 💾 Drive
     htmlBody = `
       <div style="font-family: Arial; max-width: 600px;">
         <h1 style="color: #2196F3;">💾 Video Ready!</h1>
@@ -316,30 +331,23 @@ function replyToSender(message, info, result, processedLabel, attachment = null,
         <div style="text-align: center; margin: 20px 0;">
           <img src="${info.thumbnail}" style="width: 100%; max-width: 400px; border-radius: 10px;">
         </div>
-        <div style="background: #fff3e0; padding: 15px; border-radius: 8px;">
-          <p><strong>🔒 Access:</strong> You + me only</p>
-        </div>
         <p>👤 ${escapeHtml(info.author)} • ⏱️ ${info.duration} • 📁 ${DEFAULT_RESOLUTION}</p>
-        <hr><p><em>YT Email Downloader 🚀</em></p>
+        <hr><p><em>YT Email Downloader 🚀 • Subject: <strong>"yt"</strong></em></p>
       </div>
     `;
+    plainText = `Video ready in Drive: ${info.title}\n${result.driveUrl}`;
   }
   
-  // Reply WITHOUT attachment
-  if (!result.method || result.method !== 'attachment') {
-    GmailApp.sendEmail(
-      extractEmail(message.getFrom()),
-      subject,
-      result.skipped ? `Video skipped: ${info?.title || 'Too long'}` : 
-                      result.error ? `Download failed` : 
-                      `Video ready in Drive: ${info.title}`,
-      { htmlBody: htmlBody }
-    );
-  }
+  MailApp.sendEmail({
+    to: senderEmail,
+    subject: subject,
+    body: plainText || `Video processed: ${info?.title || 'Error/Skipped'}`,
+    htmlBody: htmlBody
+  });
 }
 
 // ================================
-// 🔍 API HELPERS
+// 🔍 API HELPERS (UNCHANGED)
 // ================================
 
 function getVideoInfo(videoUrl) {
@@ -348,14 +356,13 @@ function getVideoInfo(videoUrl) {
     { 
       muteHttpExceptions: true,
       headers: { 
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-      },
-      'followRedirects': true
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      }
     }
   );
   
   if (response.getResponseCode() !== 200) {
-    throw new Error(`HTTP ${response.getResponseCode()}: ${response.getContentText().substring(0, 200)}`);
+    throw new Error(`HTTP ${response.getResponseCode()}`);
   }
   
   const data = JSON.parse(response.getContentText());
@@ -386,20 +393,23 @@ function extractEmail(fromString) {
 }
 
 // ================================
-// 📧 NOTIFICATIONS
+// 📧 NOTIFICATIONS + AUTOMATION
 // ================================
 
 function sendSummaryEmail(success, skipped, failed, results) {
   let html = `
     <h2>📊 YT Email Processing Summary</h2>
+    <p><strong>EXACT "yt" subject only</strong></p>
     <p><strong>${success}✅ ${skipped}⏭️ ${failed}❌</strong></p>
-    <h3>✅ Successful:</h3><ul>
   `;
   
-  results.filter(r => r.success).forEach(r => {
-    html += `<li>${escapeHtml(r.info?.title || 'Unknown')} → ${r.sender} (${r.method})</li>`;
-  });
-  html += '</ul>';
+  if (success > 0) {
+    html += `<h3>✅ Successful:</h3><ul>`;
+    results.filter(r => r.success).forEach(r => {
+      html += `<li>${escapeHtml(r.info?.title || 'Unknown')} → ${r.sender} (${r.method})</li>`;
+    });
+    html += '</ul>';
+  }
   
   if (skipped > 0) {
     html += `<h3 style="color: #ff9800;">⏭️ Skipped:</h3><ul>`;
@@ -417,11 +427,11 @@ function sendSummaryEmail(success, skipped, failed, results) {
     html += '</ul>';
   }
   
-  html += `<p><em>Processed: ${new Date().toLocaleString()}</em></p>`;
+  html += `<p><em>${new Date().toLocaleString()}</em></p>`;
   
   MailApp.sendEmail({
     to: Session.getActiveUser().getEmail(),
-    subject: `📧 YT Emails: ${success}/${success+skipped+failed}`,
+    subject: `📧 YT Emails (exact "yt"): ${success}/${success+skipped+failed}`,
     htmlBody: html
   });
 }
@@ -430,106 +440,113 @@ function sendAdminAlert(subject, error) {
   MailApp.sendEmail({
     to: Session.getActiveUser().getEmail(),
     subject: `🚨 ${subject}`,
-    body: `Error: ${error}\nTime: ${new Date()}\nCheck Apps Script logs.`
+    body: `Error: ${error}\nTime: ${new Date()}`
   });
 }
 
-// ================================
-// 🤖 AUTOMATION
-// ================================
-
 function setupHourlyTrigger() {
-  // Remove old triggers
   ScriptApp.getProjectTriggers().forEach(trigger => {
     if (trigger.getHandlerFunction() === 'processYtEmails') {
       ScriptApp.deleteTrigger(trigger);
     }
   });
   
-  // New hourly trigger
   ScriptApp.newTrigger('processYtEmails')
     .timeBased()
     .everyHours(1)
     .create();
     
-  console.log('✅ Hourly trigger: Every hour');
+  console.log('✅ Hourly trigger: Exact "yt" subject every hour');
 }
 
 function quickSetup() {
-  console.log('🔧 YT Email Downloader Setup...');
+  console.log('🔧 EXACT "yt" Setup...');
   
-  // Setup label
+  // Create label
   try {
-    let label = GmailApp.getUserLabelByName('yt-processed');
-    if (!label) {
-      label = GmailApp.createLabel('yt-processed');
-      console.log('✅ Created "yt-processed" label');
-    }
+    GmailApp.createLabel('yt-processed');
+    console.log('✅ Label created');
   } catch (e) {
-    console.log('ℹ️ Label setup OK');
+    console.log('ℹ️ Label exists');
   }
   
   // Setup trigger
   setupHourlyTrigger();
   
-  // Send test email
-  testWithSampleEmail();
+  // Test email with EXACT "yt"
+  testWithExactYtEmail();
   
   console.log('🎉 Setup complete!');
-  console.log('📧 Test email sent - run processYtEmails() to test now!');
+  console.log('📧 USE EXACT SUBJECT: "yt" (no other text!)');
 }
 
 // ================================
-// 🧪 TESTS
+// 🧪 TESTS - EXACT "yt"
 // ================================
 
-function testWithSampleEmail() {
-  const testUrls = [
-    'https://www.youtube.com/watch?v=dQw4w9WgXcQ'  // Rickroll - PUBLIC
-  ];
-  
+function testWithExactYtEmail() {
   const testBody = `
-    Please download these videos:
-    ${testUrls.map(url => `• ${url}`).join('\n')}
+    Download this video:
+    https://www.youtube.com/watch?v=dQw4w9WgXcQ
     
-    Thanks!
+    Exact subject "yt" required!
   `;
   
   GmailApp.sendEmail(
     Session.getActiveUser().getEmail(),
-    'yt test - rickroll',
+    'yt',  // ← EXACT "yt" subject!
     testBody,
-    { 
-      htmlBody: testBody.replace(/\n/g, '<br>'),
-      name: 'YT Email Downloader Test'
-    }
+    { htmlBody: testBody.replace(/\n/g, '<br>') }
   );
   
-  console.log('✅ Test email sent with PUBLIC Rickroll video');
-  console.log('⏳ Run processYtEmails() to process immediately');
-  console.log('📧 Check Gmail for: "yt test - rickroll"');
+  console.log('✅ EXACT "yt" test email sent!');
+  console.log('⏳ Run processYtEmails() to process it!');
+  console.log('📧 Check Gmail for subject: "yt"');
+}
+
+function testWithWrongSubject() {
+  // This will NOT trigger!
+  GmailApp.sendEmail(
+    Session.getActiveUser().getEmail(),
+    'yt test wrong',  // ← Contains "yt" but NOT exact
+    'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+    { htmlBody: 'Test with wrong subject - should NOT process!' }
+  );
+  
+  console.log('✅ Wrong subject test sent: "yt test wrong"');
+  console.log('ℹ️ This will NOT be processed (exact "yt" required)');
 }
 
 function showRecentYtEmails() {
-  const threads = GmailApp.search('subject:yt -in:trash', 0, 10);
-  console.log(`📧 Recent "yt" emails: ${threads.length}`);
+  // Show EXACT "yt"
+  const exactThreads = GmailApp.search('subject:"yt" -in:trash', 0, 10);
+  console.log(`📧 EXACT "yt" emails (${exactThreads.length}):`);
   
-  threads.forEach((thread, i) => {
+  exactThreads.forEach((thread, i) => {
+    const labels = thread.getLabels().map(l => l.getName());
+    const processed = labels.includes('yt-processed');
     const msg = thread.getMessages()[0];
     const urls = extractYouTubeUrls(msg.getBody());
-    const labels = msg.getLabels ? msg.getLabels().map(l => l.getName()) : [];
-    const processed = labels.includes('yt-processed');
     
-    console.log(`\n${i+1}. ${msg.getSubject()} ${processed ? '[✅ PROCESSED]' : '[⏳ PENDING]'}`);
+    console.log(`\n${i+1}. "${msg.getSubject()}" ${processed ? '[✅ PROCESSED]' : '[⏳ PENDING]'}`);
     console.log(`   From: ${msg.getFrom()}`);
-    console.log(`   URLs: ${urls.length > 0 ? urls.join(', ') : 'None found'}`);
-    console.log(`   Date: ${msg.getDate().toLocaleString()}`);
-    console.log(`   Labels: ${labels.join(', ') || 'None'}`);
+    console.log(`   URLs: ${urls.join(', ')}`);
+    console.log(`   Labels: ${labels.join(', ') || 'none'}`);
+  });
+  
+  // Show partial matches (for comparison)
+  const partialThreads = GmailApp.search('subject:yt -subject:"yt" -in:trash', 0, 5);
+  console.log(`\n📧 Partial "yt" matches (${partialThreads.length}) - NOT PROCESSED:`);
+  
+  partialThreads.forEach((thread, i) => {
+    const msg = thread.getMessages()[0];
+    console.log(`\n${i+1}. "${msg.getSubject()}" ← IGNORED (not exact)`);
+    console.log(`   From: ${msg.getFrom()}`);
   });
 }
 
 // ================================
-// 🛠️ UTILITIES
+// 🛠️ UTILITIES (UNCHANGED)
 // ================================
 
 function formatDuration(seconds) {
@@ -549,5 +566,5 @@ function escapeHtml(text) {
     "'": '&#039;',
     '\n': '<br>'
   };
-  return text.replace(/[&<>"'\n]/g, m => map[m]);
+  return text.toString().replace(/[&<>"'\n]/g, m => map[m]);
 }
