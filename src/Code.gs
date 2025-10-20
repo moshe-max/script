@@ -460,3 +460,43 @@ function debugMIMEStructure() {
   console.log(`\n💾 RAW MIME SAVED: ${debugFile.getUrl()}`);
   console.log('📋 Open in Drive → Download → Open with text editor');
 }
+function testFixedAPI() {
+  console.log('🧪 Testing FIXED API...');
+  const API_BASE_URL = 'https://yt-downloader-api-2rhl.onrender.com';
+  
+  // 1. Health check
+  const health = UrlFetchApp.fetch(`${API_BASE_URL}/health`);
+  console.log('🏥 Health:', health.getResponseCode(), health.getContentText().substring(0, 100));
+  
+  // 2. Info
+  const infoUrl = `${API_BASE_URL}/info?url=https://www.youtube.com/watch?v=dQw4w9WgXcQ`;
+  const infoResp = UrlFetchApp.fetch(infoUrl);
+  const info = JSON.parse(infoResp.getContentText());
+  console.log('📊 Info:', info.success, info.title?.substring(0, 30), info.can_download);
+  
+  // 3. Download
+  console.log('⬇️ Testing download...');
+  const download = UrlFetchApp.fetch(`${API_BASE_URL}/download`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    payload: JSON.stringify({ 
+      url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', 
+      resolution: '360p' 
+    }),
+    muteHttpExceptions: true
+  });
+  
+  console.log('📥 Download result:');
+  console.log('  Status:', download.getResponseCode());
+  console.log('  Content-Type:', download.getHeaders()['Content-Type'] || 'unknown');
+  console.log('  Size:', (download.getBlob().getBytes().length / (1024*1024)).toFixed(1) + 'MB');
+  
+  if (download.getResponseCode() === 200) {
+    const videoBlob = download.getBlob().setName('rickroll_test.mp4');
+    const file = DriveApp.createFile(videoBlob);
+    console.log('✅ VIDEO SAVED:', file.getUrl());
+    console.log('🎬 Open → Should play Rick Astley!');
+  } else {
+    console.log('❌ Error:', download.getContentText());
+  }
+}
