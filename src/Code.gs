@@ -424,102 +424,16 @@ function testSingleDownload() {
     console.error('❌ DOWNLOAD FAILED:', e);
   }
 }
-function debugMIMEStructure() {
-  console.log('🔍 DEBUGGING MIME STRUCTURE...');
-  
-  const url = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
-  const mimeBlob = downloadVideoMIME(url);
-  const content = mimeBlob.getDataAsString();
-  
-  console.log(`📧 MIME SIZE: ${content.length} chars`);
-  console.log(`📧 FIRST 1000 CHARS:\n${content.substring(0, 1000)}`);
-  console.log(`\n📧 BOUNDARIES FOUND:`);
-  
-  // Find all boundaries
-  const boundaryMatches = content.match(/boundary="([^"]+)"/i) || content.match(/boundary=([^\s\n\r]+)/gi);
-  if (boundaryMatches) {
-    boundaryMatches.forEach((match, i) => {
-      console.log(`  ${i+1}. ${match}`);
-    });
-  }
-  
-  // Find Content-Type: video/*
-  const videoParts = content.split(/\n\s*\n/).filter(part => 
-    part.includes('Content-Type:') && 
-    (part.includes('video/') || part.includes('audio/') || part.includes('mp4'))
-  );
-  
-  console.log(`\n📎 VIDEO PARTS FOUND (${videoParts.length}):`);
-  videoParts.forEach((part, i) => {
-    console.log(`\n--- PART ${i+1} ---`);
-    console.log(part.substring(0, 500) + (part.length > 500 ? '...' : ''));
-  });
-  
-  // Save RAW MIME to Drive for inspection
-  const debugFile = DriveApp.createFile(mimeBlob.setName('DEBUG_mime.eml'));
-  console.log(`\n💾 RAW MIME SAVED: ${debugFile.getUrl()}`);
-  console.log('📋 Open in Drive → Download → Open with text editor');
-}
-function testAPIv2() {
-  console.log('🧪 Testing API v2.2...');
+function testUniversalAPI() {
+  console.log('🧪 Testing UNIVERSAL v2.5...');
   const API_BASE_URL = 'https://yt-downloader-api-2rhl.onrender.com';
   
-  // 1. Health
+  // Quick health check
   const health = UrlFetchApp.fetch(`${API_BASE_URL}/health`);
-  console.log('🏥 Health:', health.getContentText());
+  console.log('🏥 Health OK');
   
-  // 2. Info
-  const infoUrl = `${API_BASE_URL}/info?url=https://www.youtube.com/watch?v=dQw4w9WgXcQ`;
-  const infoResp = UrlFetchApp.fetch(infoUrl);
-  const info = JSON.parse(infoResp.getContentText());
-  console.log('📊 Info:', info.title?.substring(0, 30), info.can_download);
-  
-  // 3. Download with timeout
-  console.log('⬇️ Downloading (may take 30-60s)...');
-  const startTime = new Date().getTime();
-  
-  const download = UrlFetchApp.fetch(`${API_BASE_URL}/download`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    payload: JSON.stringify({ 
-      url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', 
-      resolution: '360p' 
-    }),
-    muteHttpExceptions: true
-  });
-  
-  const duration = ((new Date().getTime() - startTime) / 1000).toFixed(1);
-  console.log(`⏱️ Duration: ${duration}s`);
-  
-  console.log('📥 Result:');
-  console.log('  Status:', download.getResponseCode());
-  console.log('  Content-Type:', download.getHeaders()['Content-Type'] || 'unknown');
-  console.log('  Size:', (download.getBlob().getBytes().length / (1024*1024)).toFixed(1) + 'MB');
-  
-  if (download.getResponseCode() === 200) {
-    const videoBlob = download.getBlob().setName('rickroll_v2.mp4');
-    const file = DriveApp.createFile(videoBlob);
-    console.log('✅ VIDEO SAVED:', file.getUrl());
-  } else {
-    console.log('❌ FULL ERROR:', download.getContentText());
-  }
-}
-function testDynamicAPI() {
-  console.log('🧪 Testing DYNAMIC MP4 v2.4...');
-  const API_BASE_URL = 'https://yt-downloader-api-2rhl.onrender.com';
-  
-  // 1. Health
-  const health = UrlFetchApp.fetch(`${API_BASE_URL}/health`);
-  console.log('🏥 Health:', health.getContentText().substring(0, 100));
-  
-  // 2. Info (shows MP4 count)
-  const infoUrl = `${API_BASE_URL}/info?url=https://www.youtube.com/watch?v=dQw4w9WgXcQ`;
-  const infoResp = UrlFetchApp.fetch(infoUrl);
-  const info = JSON.parse(infoResp.getContentText());
-  console.log('📊 MP4 Formats:', info.mp4_formats);
-  
-  // 3. Download
-  console.log('⬇️ Dynamic download (30-60s)...');
+  // Download (handles DASH automatically)
+  console.log('⬇️ Universal download (30-90s)...');
   const start = new Date().getTime();
   
   const download = UrlFetchApp.fetch(`${API_BASE_URL}/download`, {
@@ -527,7 +441,7 @@ function testDynamicAPI() {
     headers: { 'Content-Type': 'application/json' },
     payload: JSON.stringify({ 
       url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', 
-      resolution: '720p'  // Try highest first
+      resolution: '720p' 
     }),
     muteHttpExceptions: true
   });
@@ -541,16 +455,18 @@ function testDynamicAPI() {
   console.log('  Size:', (download.getBlob().getBytes().length / (1024*1024)).toFixed(1) + 'MB');
   
   if (download.getResponseCode() === 200) {
-    const headers = download.getHeaders();
-    if (headers['Content-Type']?.startsWith('video/')) {
-      const videoBlob = download.getBlob().setName('dynamic_rickroll.mp4');
+    const contentType = download.getHeaders()['Content-Type'];
+    if (contentType && contentType.startsWith('video/')) {
+      const videoBlob = download.getBlob().setName('universal_rickroll.mp4');
       const file = DriveApp.createFile(videoBlob);
-      console.log('✅ VIDEO SAVED:', file.getUrl());
-      console.log('🎬 Should play Rick Astley!');
+      console.log('✅ 🎵 VIDEO SAVED:', file.getUrl());
+      console.log('🎬 Open → Rick Astley should play!');
+      return file.getUrl();
     } else {
-      console.log('❌ Not video content:', headers['Content-Type']);
+      console.log('❌ Not video:', contentType);
     }
-  } else {
-    console.log('❌ Error:', download.getContentText());
   }
+  
+  console.log('❌ FULL ERROR:', download.getContentText());
+  return null;
 }
