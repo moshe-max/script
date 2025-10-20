@@ -1,255 +1,260 @@
 // ================================
-// 🎥 YT DOWNLOADER v5.7 - MIME EMAIL DOWNLOAD FIX
-// Handles yt-dlp MIME email format → Extracts MP4 attachment
+// 🎥 AUTO YT EMAIL DOWNLOADER v5.5 - FIXED
+// Scans "yt" subject emails → Downloads → Replies
 // ================================
 
-const API_BASE_URL = 'https://yt-downloader-api-2rhl.onrender.com';
-const MAX_DURATION_MINUTES = 20;
-const MAX_ATTACHMENT_MB = 25;
-const DEFAULT_RESOLUTION = '360p';
+// 🔧 CONFIGURATION - UPDATE THESE
+const API_BASE_URL = 'https://yt-downloader-api-2rhl.onrender.com'; // Your Render URL
+const MAX_DURATION_MINUTES = 20; // Skip >20 min videos
+const MAX_ATTACHMENT_MB = 25; // Gmail limit
+const DEFAULT_RESOLUTION = '360p'; // Fast/small files
 
 // ================================
 // 🚀 MAIN FUNCTION
 // ================================
 
+/**
+ * 🎯 MAIN: Scan "yt" emails → Download → Reply
+ */
 function processYtEmails() {
-  console.log('🔍 Scanning EXACT "yt" emails...');
-  
-  if (!testApiHealth()) {
-    console.log('💥 API DOWN - Skipping');
-    return { processed: 0, success: 0, skipped: 0, failed: 0 };
-  }
+  console.log('🔍 Scanning Gmail for "yt" subject emails...');
   
   try {
-    const searchQuery = 'subject:"yt" -in:trash -label:yt-processed';
-    const threads = GmailApp.search(searchQuery, 0, 20);
-    console.log(`📧 Found ${threads.length} EXACT "yt" threads`);
+    const threads = GmailApp.search('subject:yt -in:trash -label:yt-processed', 0, 50);
+    console.log(`📧 Found ${threads.length} "yt" email threads`);
     
     let processed = 0, success = 0, skipped = 0, failed = 0;
     const results = [];
     
-    let processedLabel = GmailApp.getUserLabelByName('yt-processed') || GmailApp.createLabel('yt-processed');
+    const processedLabel = GmailApp.getUserLabelByName('yt-processed') || GmailApp.createLabel('yt-processed');
     
     threads.forEach((thread, threadIndex) => {
-      try {
-        const threadLabels = thread.getLabels().map(l => l.getName());
-        if (threadLabels.includes('yt-processed')) return;
+      console.log(`\n📧 Thread ${threadIndex + 1}: ${thread.getFirstMessageSubject()}`);
+      
+      const messages = thread.getMessages();
+      
+      messages.forEach((message, msgIndex) => {
+        const urls = extractYouTubeUrls(message.getBody());
+        console.log(`📧 From ${message.getFrom()}: Found ${urls.length} URLs`);
         
-        console.log(`\n📧 Thread ${threadIndex + 1}: "${thread.getFirstMessageSubject()}"`);
+        if (urls.length === 0) return;
         
-        const messages = thread.getMessages();
-        let threadHasUrls = false;
+        processed += urls.length;
         
-        messages.forEach((message, msgIndex) => {
-          const urls = extractYouTubeUrls(message.getBody());
-          console.log(`  📧 Msg ${msgIndex + 1}: ${urls.length} URLs`);
-          
-          if (urls.length === 0) return;
-          
-          threadHasUrls = true;
-          
-          urls.forEach((url, urlIndex) => {
-            try {
-              console.log(`    ⬇️ [${urlIndex + 1}/${urls.length}] ${url}`);
-              const result = downloadAndReply(message, url);
-              results.push(result);
-              
-              if (result.success) success++;
-              else if (result.skipped) skipped++;
-              else failed++;
-              
-              processed++;
-              Utilities.sleep(5000);
-              
-            } catch (e) {
-              console.error(`    💥 CRASH: ${e}`);
-              failed++;
-              processed++;
-            }
-          });
+        urls.forEach((url, index) => {
+          try {
+            console.log(`Processing ${index + 1}/${urls.length}: ${url}`);
+            const result = downloadAndReply(message, url);
+            results.push(result);
+            
+            if (result.success) success++;
+            else if (result.skipped) skipped++;
+            else failed++;
+            
+            Utilities.sleep(1000); // 1s delay between requests
+          } catch (error) {
+            console.error('❌ URL error:', error);
+            failed++;
+          }
         });
-        
-        if (threadHasUrls) {
-          thread.addLabel(processedLabel);
-          console.log(`  ✅ THREAD MARKED (${processed} URLs)`);
-        }
-        
-      } catch (e) {
-        console.error(`❌ Thread ${threadIndex + 1}:`, e);
+      });
+      
+      // Mark thread as processed if any URLs were found
+      if (thread.getMessages().some(m => extractYouTubeUrls(m.getBody()).length > 0)) {
+        thread.addLabel(processedLabel);
+        console.log('✅ Thread marked processed');
       }
     });
     
-    console.log(`\n📊 SUMMARY: ✅${success} ⏭️${skipped} ❌${failed} (${processed} total)`);
-    if (success + failed + skipped > 0) sendSummaryEmail(success, skipped, failed, results);
+    console.log(`\n📊 SUMMARY: ${success} successful | ${skipped} skipped | ${failed} failed`);
+    
+    return results;
     
   } catch (error) {
-    console.error('💥 CRITICAL:', error);
-    sendAdminAlert('PROCESSOR CRASHED', error.toString());
+    console.error('❌ Script error:', error);
+    throw error;
   }
 }
 
 // ================================
-// 🔍 API HEALTH
+// 📥 EMAIL PROCESSING
 // ================================
 
-function testApiHealth() {
-  try {
-    const response = UrlFetchApp.fetch(`${API_BASE_URL}/info?url=${encodeURIComponent('https://www.youtube.com/watch?v=dQw4w9WgXcQ')}`, {
-      headers: { 'User-Agent': 'Mozilla/5.0' },
-      muteHttpExceptions: true
-    });
-    
-    if (response.getResponseCode() === 200) {
-      const data = JSON.parse(response.getContentText());
-      console.log(`✅ API HEALTHY: ${data.title}`);
-      return data.success;
+/**
+ * Extract YouTube URLs from email body
+ */
+function extractYouTubeUrls(emailBody) {
+  const patterns = [
+    /https?:\/\/(?:www\.)?youtube\.com\/watch\?v=([a-zA-Z0-9_-]{11})/g,
+    /https?:\/\/youtu\.be\/([a-zA-Z0-9_-]{11})/g
+  ];
+  
+  const urls = [];
+  patterns.forEach(pattern => {
+    let match;
+    while ((match = pattern.exec(emailBody)) !== null) {
+      urls.push(`https://www.youtube.com/watch?v=${match[1]}`);
     }
-    return false;
-  } catch (e) {
-    console.log(`❌ API HEALTH CHECK FAILED: ${e}`);
-    return false;
-  }
+  });
+  
+  return urls;
 }
 
-// ================================
-// 🎥 DOWNLOAD + MIME PARSING
-// ================================
-
+/**
+ * Download video → Reply to sender
+ */
 function downloadAndReply(message, videoUrl) {
-  const sender = extractEmail(message.getFrom());
+  const senderEmail = extractEmail(message.getFrom());
+  console.log(`⬇️ Processing for ${senderEmail}: ${videoUrl}`);
   
   try {
     // 1. Get video info
     const info = getVideoInfo(videoUrl);
-    console.log(`  ✅ ${info.title.substring(0, 40)}... (${info.duration})`);
     
-    // 2. Duration check
+    // 2. Check duration
     if (info.length > MAX_DURATION_MINUTES * 60) {
-      const reason = `Too long (${formatDuration(info.length)})`;
+      const reason = `Too long (${formatDuration(info.length)} > ${MAX_DURATION_MINUTES}min)`;
       replyToSender(message, info, { skipped: true, reason });
-      return { success: false, skipped: true, reason, info, sender, url: videoUrl };
+      return { success: false, skipped: true, reason, info, sender: senderEmail, url: videoUrl };
     }
     
-    // 3. Download + Parse MIME
-    console.log(`  ⬇️ Downloading ${DEFAULT_RESOLUTION}...`);
-    const mimeBlob = downloadVideoMIME(videoUrl);
-    const videoBlob = parseMIMEVideo(mimeBlob, info.title);
+    // 3. Download video
+    console.log(`⬇️ Downloading ${DEFAULT_RESOLUTION}...`);
+    const downloadResponse = UrlFetchApp.fetch(`${API_BASE_URL}/download`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      payload: JSON.stringify({ url: videoUrl, resolution: DEFAULT_RESOLUTION }),
+      muteHttpExceptions: true
+    });
     
-    const fileSizeMB = videoBlob.getBytes().length / (1024 * 1024);
-    const fileName = `${info.title.substring(0, 50)} [${DEFAULT_RESOLUTION}].mp4`;
-    videoBlob.setName(fileName);
+    if (downloadResponse.getResponseCode() !== 200) {
+      throw new Error(`Download failed: ${downloadResponse.getContentText()}`);
+    }
     
-    console.log(`  📁 ${fileName} (${fileSizeMB.toFixed(1)}MB)`);
+    const blob = downloadResponse.getBlob();
+    const fileSizeMB = blob.getBytes().length / 1024 / 1024;
     
-    // 4. Deliver
+    // 4. Smart delivery
     if (fileSizeMB <= MAX_ATTACHMENT_MB) {
-      console.log(`  📎 ATTACHING`);
-      replyToSender(message, info, { method: 'attachment', sizeMB: fileSizeMB.toFixed(1) }, videoBlob);
-      return { success: true, method: 'attachment', sizeMB: fileSizeMB.toFixed(1), info, sender, url: videoUrl };
+      console.log(`📎 Sending attachment (${fileSizeMB.toFixed(1)}MB)`);
+      replyToSender(message, info, { method: 'attachment', sizeMB: fileSizeMB.toFixed(1) }, blob);
     } else {
-      console.log(`  💾 DRIVE`);
-      const file = DriveApp.createFile(videoBlob);
-      setPrivateSharing(file, sender);
+      console.log(`💾 Sending Drive link (${fileSizeMB.toFixed(1)}MB)`);
+      const file = DriveApp.createFile(blob);
+      setPrivateSharing(file, senderEmail);
       replyToSender(message, info, { method: 'drive', driveUrl: file.getUrl(), sizeMB: fileSizeMB.toFixed(1) }, null, file);
-      return { success: true, method: 'drive', sizeMB: fileSizeMB.toFixed(1), info, sender, url: videoUrl };
     }
     
+    return { success: true, info, sender: senderEmail, url: videoUrl };
+    
   } catch (error) {
-    console.log(`  ❌ FAILED: ${error.message}`);
-    replyToSender(message, null, { error: error.message, videoUrl });
-    return { success: false, error: error.message, sender, url: videoUrl };
+    console.error('❌ Failed:', error);
+    replyToSender(message, null, { error: error.toString(), videoUrl });
+    return { success: false, error: error.toString(), sender: senderEmail, url: videoUrl };
   }
 }
 
+// ================================
+// 📧 REPLY FUNCTION
+// ================================
+
 /**
- * 🔥 CRITICAL FIX: Download MIME email → Extract MP4 attachment
+ * Reply to sender with result
  */
-function downloadVideoMIME(videoUrl) {
-  const response = UrlFetchApp.fetch(`${API_BASE_URL}/download`, {
-    method: 'POST',
-    headers: { 
-      'Content-Type': 'application/json',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-    },
-    payload: JSON.stringify({ url: videoUrl, resolution: DEFAULT_RESOLUTION }),
-    muteHttpExceptions: true
+function replyToSender(message, info, result, attachment = null, driveFile = null) {
+  const senderEmail = extractEmail(message.getFrom());
+  const subject = `Re: ${message.getSubject()}`;
+  
+  let htmlBody;
+  
+  if (result.skipped) {
+    htmlBody = `
+      <h2 style="color: #ff9800;">⏭️ Video Skipped</h2>
+      <p><strong>${escapeHtml(info.title)}</strong></p>
+      <p style="color: #ff9800;"><em>${escapeHtml(result.reason)}</em></p>
+      <p>👤 ${escapeHtml(info.author)} • ⏱️ ${info.duration}</p>
+      <p><a href="${info.url}" target="_blank">▶️ Watch on YouTube</a></p>
+      <hr><p><em>YT Email Downloader</em></p>
+    `;
+    
+  } else if (result.error) {
+    htmlBody = `
+      <h2 style="color: #f44336;">❌ Download Failed</h2>
+      <p><strong>URL:</strong> ${escapeHtml(result.videoUrl || 'Unknown')}</p>
+      <p><strong>Error:</strong> ${escapeHtml(result.error)}</p>
+      <p>💡 Try a <a href="https://www.youtube.com/watch?v=dQw4w9WgXcQ">public video</a> to test.</p>
+      <hr><p><em>YT Email Downloader</em></p>
+    `;
+    
+  } else if (result.method === 'attachment') {
+    htmlBody = `
+      <div style="font-family: Arial; max-width: 600px;">
+        <h1 style="color: #4CAF50;">✅ Video Downloaded!</h1>
+        <div style="background: #e8f5e8; padding: 20px; border-radius: 10px; text-align: center;">
+          <h2>📎 <strong>VIDEO ATTACHED</strong></h2>
+          <p><strong>${escapeHtml(info.title)}</strong></p>
+          <p>📎 ${attachment.getName()} • ${result.sizeMB}MB</p>
+        </div>
+        <div style="text-align: center; margin: 20px 0;">
+          <img src="${info.thumbnail}" style="width: 100%; max-width: 400px; border-radius: 10px;">
+        </div>
+        <p>👤 ${escapeHtml(info.author)} • ⏱️ ${info.duration} • 📁 ${DEFAULT_RESOLUTION}</p>
+        <hr><p><em>YT Email Downloader 🚀</em></p>
+      </div>
+    `;
+    
+    MailApp.sendEmail({
+      to: senderEmail,
+      subject: subject,
+      htmlBody: htmlBody,
+      attachments: [attachment]
+    });
+    return;
+    
+  } else {
+    htmlBody = `
+      <div style="font-family: Arial; max-width: 600px;">
+        <h1 style="color: #2196F3;">💾 Video Ready in Drive!</h1>
+        <div style="background: #e3f2fd; padding: 20px; border-radius: 10px; text-align: center;">
+          <h2>🔒 <strong>PRIVATE DRIVE LINK</strong></h2>
+          <p><strong>${escapeHtml(info.title)}</strong></p>
+          <p>📁 ${driveFile.getName()} • ${result.sizeMB}MB</p>
+        </div>
+        <div style="text-align: center; margin: 20px 0;">
+          <a href="${result.driveUrl}" style="background: #2196F3; color: white; 
+             padding: 15px 30px; text-decoration: none; border-radius: 25px; 
+             font-size: 16px; display: inline-block;">
+            📁 Open in Drive
+          </a>
+        </div>
+        <div style="text-align: center; margin: 20px 0;">
+          <img src="${info.thumbnail}" style="width: 100%; max-width: 400px; border-radius: 10px;">
+        </div>
+        <p>👤 ${escapeHtml(info.author)} • ⏱️ ${info.duration} • 📁 ${DEFAULT_RESOLUTION}</p>
+        <hr><p><em>YT Email Downloader 🚀</em></p>
+      </div>
+    `;
+  }
+  
+  MailApp.sendEmail({
+    to: senderEmail,
+    subject: subject,
+    htmlBody: htmlBody
   });
-  
-  if (response.getResponseCode() !== 200) {
-    throw new Error(`Download HTTP ${response.getResponseCode()}: ${response.getContentText().substring(0, 100)}`);
-  }
-  
-  return response.getBlob().setName('download.eml');
 }
 
-/**
- * 🔥 PARSE MIME EMAIL → Extract video attachment
- */
-function parseMIMEVideo(mimeBlob, videoTitle) {
-  try {
-    const content = mimeBlob.getDataAsString();
-    
-    // Find boundary (e.g., "--=Part_123...")
-    const boundaryMatch = content.match(/boundary="([^"]+)"/i) || content.match(/boundary=([^\s\n]+)/i);
-    if (!boundaryMatch) {
-      throw new Error('No MIME boundary found');
-    }
-    const boundary = `--${boundaryMatch[1].replace(/-{2,}$/, '')}`;
-    
-    console.log(`  🔍 MIME boundary: ${boundary}`);
-    
-    // Split parts by boundary
-    const parts = content.split(new RegExp(`${boundary}(?:\\s*--)?`, 'g'));
-    
-    // Find video attachment (mp4/m4a/webm)
-    for (let i = 1; i < parts.length - 1; i++) { // Skip headers
-      const part = parts[i].trim();
-      
-      // Check Content-Type
-      if (part.includes('Content-Type:') && 
-          (part.includes('video/') || part.includes('audio/'))) {
-        
-        // Extract filename
-        const filenameMatch = part.match(/filename="([^"]+)"/i) || part.match(/filename=([^;\s\n]+)/i);
-        const filename = filenameMatch ? filenameMatch[1] : `${videoTitle}.mp4`;
-        
-        // Find Content-Transfer-Encoding: base64
-        if (part.includes('Content-Transfer-Encoding: base64')) {
-          // Extract base64 data (after headers, before next boundary)
-          const base64Start = part.indexOf('\n\n') + 2;
-          const base64End = part.indexOf(boundary, base64Start);
-          const base64Data = part.substring(base64Start, base64End).trim()
-            .replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, '') // Trim whitespace
-            .replace(/\r?\n/g, ''); // Remove line breaks
-            
-          console.log(`  📎 Found attachment: ${filename} (${base64Data.length} chars)`);
-          
-          // Decode base64 → video blob
-          const bytes = Utilities.base64Decode(base64Data);
-          const videoBlob = Utilities.newBlob(bytes, 'video/mp4', filename);
-          
-          console.log(`  ✅ Video extracted: ${videoBlob.getBytes().length / (1024*1024)}MB`);
-          return videoBlob;
-        }
-      }
-    }
-    
-    throw new Error('No video attachment found in MIME');
-    
-  } catch (error) {
-    console.error('MIME parsing error:', error);
-    throw new Error(`MIME parse failed: ${error.message}`);
-  }
-}
+// ================================
+// 🔍 API HELPERS
+// ================================
 
 function getVideoInfo(videoUrl) {
-  const response = UrlFetchApp.fetch(`${API_BASE_URL}/info?url=${encodeURIComponent(videoUrl)}`, {
-    headers: { 'User-Agent': 'Mozilla/5.0' },
-    muteHttpExceptions: true
-  });
+  const response = UrlFetchApp.fetch(
+    `${API_BASE_URL}/info?url=${encodeURIComponent(videoUrl)}`,
+    { muteHttpExceptions: true }
+  );
   
   if (response.getResponseCode() !== 200) {
-    throw new Error(`Info HTTP ${response.getResponseCode()}`);
+    throw new Error(`API failed: ${response.getResponseCode()}`);
   }
   
   const data = JSON.parse(response.getContentText());
@@ -262,216 +267,92 @@ function getVideoInfo(videoUrl) {
 }
 
 // ================================
-// 📧 REPLIES + UTILITIES
-// ================================
-
-function replyToSender(message, info, result, attachment = null, driveFile = null) {
-  const senderEmail = extractEmail(message.getFrom());
-  const subject = `Re: ${message.getSubject()}`;
-  
-  let htmlBody;
-  
-  if (result.skipped) {
-    htmlBody = `<h2 style="color:#ff9800">⏭️ SKIPPED</h2><p>${escapeHtml(result.reason)}</p>`;
-  } else if (result.error) {
-    htmlBody = `<h2 style="color:#f44336">❌ FAILED</h2><p>${escapeHtml(result.error)}</p>`;
-  } else if (result.method === 'attachment') {
-    htmlBody = `
-      <div style="font-family:Arial;max-width:600px">
-        <h1 style="color:#4CAF50">✅ VIDEO ATTACHED!</h1>
-        <div style="background:#e8f5e8;padding:20px;border-radius:10px">
-          <h2>${escapeHtml(info.title)}</h2>
-          <p>📎 ${attachment.getName()} (${result.sizeMB}MB)</p>
-        </div>
-        <img src="${info.thumbnail}" style="max-width:400px;border-radius:10px">
-        <p>👤 ${escapeHtml(info.author)} • ⏱️ ${info.duration}</p>
-      </div>
-    `;
-    MailApp.sendEmail(senderEmail, subject, 'Video attached!', { 
-      htmlBody, 
-      attachments: [attachment] 
-    });
-    return;
-  } else {
-    htmlBody = `
-      <div style="font-family:Arial;max-width:600px">
-        <h1 style="color:#2196F3">💾 DRIVE LINK</h1>
-        <div style="background:#e3f2fd;padding:20px;border-radius:10px">
-          <h2>${escapeHtml(info.title)}</h2>
-          <p>📁 ${driveFile.getName()} (${result.sizeMB}MB)</p>
-        </div>
-        <a href="${result.driveUrl}" style="background:#2196F3;color:white;padding:15px 30px;
-           text-decoration:none;border-radius:25px;display:inline-block">📁 Open Drive</a>
-        <img src="${info.thumbnail}" style="max-width:400px;border-radius:10px">
-      </div>
-    `;
-  }
-  
-  MailApp.sendEmail(senderEmail, subject, result.error || 'Video ready', { htmlBody });
-}
-
-function extractYouTubeUrls(body) {
-  const text = body.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
-  const urls = new Set();
-  
-  const patterns = [
-    /https?:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/gi,
-    /https?:\/\/(?:www\.)?youtube\.com\/watch\?v=([a-zA-Z0-9_-]{11})/gi,
-    /youtu\.be\/([a-zA-Z0-9_-]{11})/gi
-  ];
-  
-  patterns.forEach(pattern => {
-    let match;
-    while ((match = pattern.exec(text)) !== null) {
-      urls.add(`https://www.youtube.com/watch?v=${match[1]}`);
-    }
-  });
-  
-  return Array.from(urls);
-}
-
-function extractEmail(from) {
-  const match = from.match(/<(.+?)>/);
-  return match ? match[1] : from.split(' ').pop().replace(/[^\w@.-]+/g, '');
-}
-
-function formatDuration(seconds) {
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${m}:${s.toString().padStart(2, '0')}`;
-}
-
-function escapeHtml(text) {
-  const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
-  return (text || '').toString().replace(/[&<>"']/g, m => map[m]);
-}
-
-function setPrivateSharing(file, email) {
-  try {
-    file.setSharing(DriveApp.Access.PRIVATE, DriveApp.Permission.VIEW);
-    if (email && email !== Session.getActiveUser().getEmail()) {
-      file.addViewer(email);
-    }
-  } catch (e) {}
-}
-
-// ================================
-// 📧 SUMMARY
-// ================================
-
-function sendSummaryEmail(success, skipped, failed, results) {
-  let html = `<h2>📊 YT Summary</h2><p><strong>${success}✅ ${skipped}⏭️ ${failed}❌</strong></p>`;
-  
-  if (success > 0) html += `<h3>✅ Success</h3><ul>${results.filter(r=>r.success).map(r=>`<li>${escapeHtml(r.info?.title||'Unknown')} (${r.method})</li>`).join('')}</ul>`;
-  if (failed > 0) html += `<h3 style="color:#f44336">❌ Failed</h3><ul>${results.filter(r=>!r.success&&!r.skipped).map(r=>`<li>${escapeHtml(r.url)}: ${r.error}</li>`).join('')}</ul>`;
-  
-  MailApp.sendEmail({
-    to: Session.getActiveUser().getEmail(),
-    subject: `YT: ${success}/${success+skipped+failed}`,
-    htmlBody: html
-  });
-}
-
-// ================================
 // 🧪 TESTS
 // ================================
 
 function quickSetup() {
   console.log('🔧 Setup...');
-  try { GmailApp.createLabel('yt-processed'); } catch(e) {}
+  
+  try {
+    GmailApp.createLabel('yt-processed');
+    console.log('✅ Label created');
+  } catch (e) {
+    console.log('ℹ️ Label exists');
+  }
+  
+  // Setup trigger
   setupHourlyTrigger();
+  
+  // Send test email
   testWithExactYtEmail();
-  console.log('✅ Setup complete!');
+  
+  console.log('🎉 Setup complete! USE EXACT SUBJECT: "yt"');
 }
 
 function setupHourlyTrigger() {
-  ScriptApp.getProjectTriggers().forEach(t => {
-    if (t.getHandlerFunction() === 'processYtEmails') ScriptApp.deleteTrigger(t);
+  ScriptApp.getProjectTriggers().forEach(trigger => {
+    if (trigger.getHandlerFunction() === 'processYtEmails') {
+      ScriptApp.deleteTrigger(trigger);
+    }
   });
-  ScriptApp.newTrigger('processYtEmails').timeBased().everyHours(1).create();
+  
+  ScriptApp.newTrigger('processYtEmails')
+    .timeBased()
+    .everyHours(1)
+    .create();
+    
+  console.log('✅ Hourly trigger: Every hour');
 }
 
 function testWithExactYtEmail() {
+  const testBody = `
+    Test download:
+    https://www.youtube.com/watch?v=dQw4w9WgXcQ
+    
+    Exact subject "yt" required!
+  `;
+  
   GmailApp.sendEmail(
     Session.getActiveUser().getEmail(),
-    'yt',
-    'Test: https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-    { htmlBody: 'Test: <a href="https://www.youtube.com/watch?v=dQw4w9WgXcQ">Rickroll</a>' }
+    'yt',  // ← EXACT "yt"
+    testBody,
+    { htmlBody: testBody.replace(/\n/g, '<br>') }
   );
-  console.log('✅ Test email sent → Run processYtEmails()');
+  
+  console.log('✅ EXACT "yt" test email sent!');
+  console.log('⏳ Run processYtEmails() to process it');
 }
 
-function testSingleDownload() {
-  console.log('🧪 Testing SINGLE download...');
-  const url = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+function showRecentYtEmails() {
+  const threads = GmailApp.search('subject:"yt" -in:trash', 0, 10);
+  console.log(`📧 EXACT "yt" emails (${threads.length}):`);
   
-  try {
-    const info = getVideoInfo(url);
-    console.log(`✅ Info: ${info.title} (${info.duration})`);
+  threads.forEach((thread, i) => {
+    const labels = thread.getLabels().map(l => l.getName());
+    const msg = thread.getMessages()[0];
+    const urls = extractYouTubeUrls(msg.getBody());
+    const processed = labels.includes('yt-processed');
     
-    const mimeBlob = downloadVideoMIME(url);
-    console.log(`✅ MIME: ${mimeBlob.getBytes().length} bytes`);
-    
-    const videoBlob = parseMIMEVideo(mimeBlob, info.title);
-    console.log(`✅ VIDEO: ${videoBlob.getName()} (${(videoBlob.getBytes().length/(1024*1024)).toFixed(1)}MB)`);
-    
-    // Save to Drive for verification
-    const file = DriveApp.createFile(videoBlob);
-    console.log(`✅ SAVED: ${file.getUrl()}`);
-    
-    console.log('🎉 DOWNLOAD SUCCESS!');
-  } catch (e) {
-    console.error('❌ DOWNLOAD FAILED:', e);
-  }
-}
-function testLightweightAPI() {
-  console.log('🧪 Testing LIGHTWEIGHT v2.7...');
-  const API_BASE_URL = 'https://yt-downloader-api-2rhl.onrender.com';
-  
-  // Health check
-  const healthResp = UrlFetchApp.fetch(`${API_BASE_URL}/health`);
-  const health = JSON.parse(healthResp.getContentText());
-  console.log('🏥 Health:', health.message);
-  
-  // Download (may take 2-5 minutes with retries)
-  console.log('⬇️ Lightweight download (120-300s)...');
-  const startTime = new Date().getTime();
-  
-  const download = UrlFetchApp.fetch(`${API_BASE_URL}/download`, {
-    method: 'POST',
-    headers: { 
-      'Content-Type': 'application/json',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-    },
-    payload: JSON.stringify({ 
-      url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'  // Rick Astley
-    }),
-    muteHttpExceptions: true
+    console.log(`\n${i+1}. "${msg.getSubject()}" ${processed ? '[✅ PROCESSED]' : '[⏳ PENDING]'}`);
+    console.log(`   From: ${msg.getFrom()}`);
+    console.log(`   URLs: ${urls.join(', ')}`);
+    console.log(`   Labels: ${labels.join(', ') || 'none'}`);
   });
-  
-  const duration = ((new Date().getTime() - startTime) / 1000).toFixed(1);
-  console.log(`⏱️ Total time: ${duration}s`);
-  
-  console.log('📥 Result:');
-  console.log('  Status:', download.getResponseCode());
-  console.log('  Content-Type:', download.getHeaders()['Content-Type'] || 'none');
-  console.log('  Size:', (download.getBlob().getBytes().length / (1024*1024)).toFixed(1) + 'MB');
-  
-  if (download.getResponseCode() === 200) {
-    const contentType = download.getHeaders()['Content-Type'];
-    if (contentType && contentType.startsWith('video/')) {
-      const videoBlob = download.getBlob().setName('lightweight_rickroll.mp4');
-      const file = DriveApp.createFile(videoBlob);
-      console.log('✅ 🎵 VIDEO SAVED:', file.getUrl());
-      console.log('🎬 Should play Rick Astley in 720p!');
-      return file.getUrl();
-    } else {
-      console.log('❌ Not video content:', contentType);
-      console.log('❌ Response:', download.getContentText());
-    }
-  } else {
-    console.log('❌ ERROR:', download.getContentText());
-  }
-  
-  return null;
+}
+
+// ================================
+// 🛠️ UTILITIES
+// ================================
+
+function formatDuration(seconds) {
+  if (!seconds || isNaN(seconds)) return '0:00';
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
+function escapeHtml(text) {
+  if (!text) return '';
+  const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;', '\n': '<br>' };
+  return text.toString().replace(/[&<>"'\n]/g, m => map[m]);
 }
