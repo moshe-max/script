@@ -424,3 +424,39 @@ function testSingleDownload() {
     console.error('❌ DOWNLOAD FAILED:', e);
   }
 }
+function debugMIMEStructure() {
+  console.log('🔍 DEBUGGING MIME STRUCTURE...');
+  
+  const url = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+  const mimeBlob = downloadVideoMIME(url);
+  const content = mimeBlob.getDataAsString();
+  
+  console.log(`📧 MIME SIZE: ${content.length} chars`);
+  console.log(`📧 FIRST 1000 CHARS:\n${content.substring(0, 1000)}`);
+  console.log(`\n📧 BOUNDARIES FOUND:`);
+  
+  // Find all boundaries
+  const boundaryMatches = content.match(/boundary="([^"]+)"/i) || content.match(/boundary=([^\s\n\r]+)/gi);
+  if (boundaryMatches) {
+    boundaryMatches.forEach((match, i) => {
+      console.log(`  ${i+1}. ${match}`);
+    });
+  }
+  
+  // Find Content-Type: video/*
+  const videoParts = content.split(/\n\s*\n/).filter(part => 
+    part.includes('Content-Type:') && 
+    (part.includes('video/') || part.includes('audio/') || part.includes('mp4'))
+  );
+  
+  console.log(`\n📎 VIDEO PARTS FOUND (${videoParts.length}):`);
+  videoParts.forEach((part, i) => {
+    console.log(`\n--- PART ${i+1} ---`);
+    console.log(part.substring(0, 500) + (part.length > 500 ? '...' : ''));
+  });
+  
+  // Save RAW MIME to Drive for inspection
+  const debugFile = DriveApp.createFile(mimeBlob.setName('DEBUG_mime.eml'));
+  console.log(`\n💾 RAW MIME SAVED: ${debugFile.getUrl()}`);
+  console.log('📋 Open in Drive → Download → Open with text editor');
+}
