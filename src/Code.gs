@@ -104,3 +104,29 @@ Saved to your Google Drive!
     throw error;
   }
 }
+function test2_videoInfo_DEBUG() {
+  const url = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+  
+  // Enable full error details
+  const response = UrlFetchApp.fetch(
+    `${API_BASE_URL}/info?url=${encodeURIComponent(url)}`, 
+    { 
+      method: 'GET',
+      muteHttpExceptions: true,  // ← CRITICAL: Shows full error
+      headers: { 'User-Agent': 'Mozilla/5.0' }
+    }
+  );
+  
+  console.log('🔍 FULL DEBUG INFO:');
+  console.log('Status Code:', response.getResponseCode());
+  console.log('Full Response:', response.getContentText());
+  console.log('Headers:', response.getHeaders());
+  
+  if (response.getResponseCode() === 200) {
+    const data = JSON.parse(response.getContentText());
+    console.log('✅ SUCCESS:', data.title);
+    return data;
+  } else {
+    console.error('❌ FAILED - Full error above');
+  }
+}
