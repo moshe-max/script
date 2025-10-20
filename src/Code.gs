@@ -1,78 +1,101 @@
 // ================================
-// 🎥 AUTO YT EMAIL DOWNLOADER v5.0
+// 🎥 AUTO YT EMAIL DOWNLOADER v5.1 - FIXED
 // Scans "yt" subject emails → Downloads → Replies
 // ================================
 
 // 🔧 CONFIGURATION
 const API_BASE_URL = 'https://yt-downloader-api-2rhl.onrender.com';
-const MAX_DURATION_MINUTES = 20;  // Skip >20min videos
-const MAX_ATTACHMENT_MB = 25;     // Gmail limit
+const MAX_DURATION_MINUTES = 20;
+const MAX_ATTACHMENT_MB = 25;
 const DEFAULT_RESOLUTION = '360p';
 
 // ================================
-// 🚀 MAIN FUNCTION - RUN THIS!
+// 🚀 MAIN FUNCTION
 // ================================
 
 /**
  * 🎯 MAIN: Scan "yt" emails → Download → Reply
- * Run manually or setup trigger
  */
 function processYtEmails() {
   console.log('🔍 Scanning Gmail for "yt" subject emails...');
   
   try {
-    // 1. Find emails with "yt" in subject
-    const threads = GmailApp.search('subject:yt -in:trash', 0, 50); // Last 50 emails
-    console.log(`📧 Found ${threads.length} "yt" email threads`);
+    // 1. Find emails with "yt" in subject (UNPROCESSED only)
+    const searchQuery = 'subject:yt -in:trash -label:yt-processed';
+    const threads = GmailApp.search(searchQuery, 0, 20); // Last 20 emails
+    console.log(`📧 Found ${threads.length} unprocessed "yt" threads`);
     
     let processed = 0, success = 0, skipped = 0, failed = 0;
     const results = [];
     
-    threads.forEach(thread => {
-      const messages = thread.getMessages();
-      messages.forEach(message => {
-        // Skip processed emails
-        if (message.isStarred()) {
-          console.log('⏭️ Skipping starred (processed)');
-          return;
-        }
+    threads.forEach((thread, threadIndex) => {
+      try {
+        const messages = thread.getMessages();
+        console.log(`\n📧 Thread ${threadIndex + 1}: ${thread.getFirstMessageSubject()}`);
         
-        // Extract YouTube URLs from email body
-        const urls = extractYouTubeUrls(message.getBody());
-        console.log(`📧 From ${message.getFrom()}: Found ${urls.length} URLs`);
-        
-        if (urls.length === 0) return;
-        
-        processed++;
-        
-        // Process each URL
-        urls.forEach(url => {
-          try {
-            const result = downloadAndReply(message, url);
-            results.push(result);
-            
-            if (result.success) success++;
-            else if (result.skipped) skipped++;
-            else failed++;
-            
-            // Rate limit
-            Utilities.sleep(3000); // 3s between downloads
-            
-          } catch (error) {
-            console.error(`❌ URL failed: ${url}`, error);
-            failed++;
+        messages.forEach((message, msgIndex) => {
+          // Skip if already processed (has label)
+          if (message.getLabels().some(label => label.getName() === 'yt-processed')) {
+            console.log(`  ⏭️ Message ${msgIndex + 1} already processed`);
+            return;
           }
+          
+          // Extract YouTube URLs
+          const urls = extractYouTubeUrls(message.getBody());
+          console.log(`  📧 From ${message.getFrom()}: ${urls.length} URLs`);
+          
+          if (urls.length === 0) return;
+          
+          processed++;
+          
+          // Process each URL
+          urls.forEach((url, urlIndex) => {
+            try {
+              console.log(`    ⬇️ [${urlIndex + 1}/${urls.length}] ${url}`);
+              const result = downloadAndReply(message, url);
+              results.push({ ...result, threadId: thread.getId(), messageId: message.getId() });
+              
+              if (result.success) success++;
+              else if (result.skipped) skipped++;
+              else failed++;
+              
+              // Rate limit: 5s between downloads
+              Utilities.sleep(5000);
+              
+            } catch (urlError) {
+              console.error(`    ❌ URL failed: ${url}`, urlError);
+              results.push({ 
+                success: false, 
+                error: urlError.toString(), 
+                url, 
+                sender: message.getFrom(),
+                threadId: thread.getId(),
+                messageId: message.getId()
+              });
+              failed++;
+            }
+          });
+          
+          // Mark message as processed
+          message.addLabel(GmailApp.getUserLabelByName('yt-processed') || 
+                          GmailApp.createLabel('yt-processed'));
+          console.log(`  ✅ Message ${msgIndex + 1} marked processed`);
+          
         });
         
-        // Mark thread as processed
-        thread.star(); // Visual indicator
-      });
+      } catch (threadError) {
+        console.error(`❌ Thread ${threadIndex + 1} failed:`, threadError);
+      }
     });
     
     // Summary
-    console.log(`\n📊 SUMMARY: ${success}✅ ${skipped}⏭️ ${failed}❌ / ${processed} processed`);
+    console.log(`\n📊 FINAL SUMMARY:`);
+    console.log(`✅ Success: ${success}`);
+    console.log(`⏭️ Skipped: ${skipped}`); 
+    console.log(`❌ Failed: ${failed}`);
+    console.log(`📧 Processed: ${processed} messages`);
     
-    if (success > 0) {
+    if (success > 0 || failed > 0) {
       sendSummaryEmail(success, skipped, failed, results);
     }
     
@@ -80,7 +103,7 @@ function processYtEmails() {
     
   } catch (error) {
     console.error('💥 CRITICAL ERROR:', error);
-    sendAdminAlert('YT Email Processor Failed', error.toString());
+    sendAdminAlert('YT Email Processor CRASHED', error.toString());
     throw error;
   }
 }
@@ -94,44 +117,58 @@ function processYtEmails() {
  */
 function extractYouTubeUrls(emailBody) {
   const patterns = [
-    /https?:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/g,
-    /https?:\/\/(?:www\.)?youtube\.com\/watch\?v=([a-zA-Z0-9_-]{11})/g,
-    /youtu\.be\/([a-zA-Z0-9_-]{11})/g
+    /https?:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/gi,
+    /https?:\/\/(?:www\.)?youtube\.com\/watch\?v=([a-zA-Z0-9_-]{11})/gi,
+    /youtu\.be\/([a-zA-Z0-9_-]{11})/gi
   ];
   
-  const urls = [];
-  let match;
+  const urls = new Set();
   
   patterns.forEach(pattern => {
+    let match;
     while ((match = pattern.exec(emailBody)) !== null) {
       const videoId = match[1];
-      // Convert to full watch URL
-      urls.push(`https://www.youtube.com/watch?v=${videoId}`);
+      urls.add(`https://www.youtube.com/watch?v=${videoId}`);
     }
   });
   
-  return [...new Set(urls)]; // Remove duplicates
+  return Array.from(urls);
 }
 
 /**
  * Download video → Reply to sender
  */
 function downloadAndReply(message, videoUrl) {
-  const sender = message.getFrom().match(/<(.+?)>/)?.[1] || message.getFrom();
-  console.log(`⬇️ Processing for ${sender}: ${videoUrl}`);
+  const senderEmail = extractEmail(message.getFrom());
+  console.log(`⬇️ Processing for ${senderEmail}: ${videoUrl}`);
   
   try {
-    // 1. Get video info
-    const info = getVideoInfo(videoUrl);
+    // 1. Get video info (with better error handling)
+    let info;
+    try {
+      info = getVideoInfo(videoUrl);
+      console.log(`  ✅ Video: ${info.title} (${info.duration})`);
+    } catch (infoError) {
+      if (infoError.message.includes('Video not found') || 
+          infoError.message.includes('private')) {
+        replyToSender(message, null, { 
+          error: 'Video unavailable (private/deleted)', 
+          videoUrl 
+        });
+        return { success: false, error: infoError.message, sender: senderEmail, url: videoUrl };
+      }
+      throw infoError;
+    }
     
     // 2. Check duration limit
     if (info.length > MAX_DURATION_MINUTES * 60) {
       const reason = `Too long (${formatDuration(info.length)} > ${MAX_DURATION_MINUTES}min)`;
       replyToSender(message, info, { skipped: true, reason });
-      return { success: false, skipped: true, reason, info, sender };
+      return { success: false, skipped: true, reason, info, sender: senderEmail, url: videoUrl };
     }
     
     // 3. Download video
+    console.log(`  ⬇️ Downloading ${DEFAULT_RESOLUTION}...`);
     const downloadResponse = UrlFetchApp.fetch(`${API_BASE_URL}/download`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -140,7 +177,8 @@ function downloadAndReply(message, videoUrl) {
     });
     
     if (downloadResponse.getResponseCode() !== 200) {
-      throw new Error(`Download failed: ${downloadResponse.getContentText()}`);
+      const errorMsg = downloadResponse.getContentText();
+      throw new Error(`Download API failed: ${errorMsg}`);
     }
     
     const blob = downloadResponse.getBlob();
@@ -148,19 +186,21 @@ function downloadAndReply(message, videoUrl) {
     const fileName = `${info.title.substring(0, 50)} [${DEFAULT_RESOLUTION}].mp4`;
     blob.setName(fileName);
     
-    console.log(`📁 ${fileName} (${fileSizeMB.toFixed(1)}MB)`);
+    console.log(`  📁 ${fileName} (${fileSizeMB.toFixed(1)}MB)`);
     
     let replyData;
     
     // 4. Smart delivery
     if (fileSizeMB <= MAX_ATTACHMENT_MB) {
       // 📎 Attachment
+      console.log(`  📎 Sending attachment (${fileSizeMB.toFixed(1)}MB)`);
       replyData = { method: 'attachment', sizeMB: fileSizeMB.toFixed(1) };
       replyToSender(message, info, replyData, blob);
     } else {
-      // 💾 Drive (private)
+      // 💾 Drive
+      console.log(`  💾 Saving to private Drive (${fileSizeMB.toFixed(1)}MB)`);
       const file = DriveApp.createFile(blob);
-      setPrivateSharing(file, sender);
+      setPrivateSharing(file, senderEmail);
       replyData = { 
         method: 'drive', 
         fileId: file.getId(), 
@@ -170,41 +210,43 @@ function downloadAndReply(message, videoUrl) {
       replyToSender(message, info, replyData, null, file);
     }
     
-    return { success: true, info, sender, ...replyData };
+    console.log(`  ✅ SUCCESS: ${info.title}`);
+    return { success: true, info, sender: senderEmail, url: videoUrl, ...replyData };
     
   } catch (error) {
-    console.error('❌ Download failed:', error);
-    replyToSender(message, null, { error: error.toString() });
-    return { success: false, error: error.toString(), sender };
+    console.error(`  ❌ FAILED: ${error.message}`);
+    replyToSender(message, null, { error: error.message, videoUrl });
+    return { success: false, error: error.message, sender: senderEmail, url: videoUrl };
   }
 }
 
 /**
- * Reply to sender with download
+ * Reply to sender with download/result
  */
 function replyToSender(message, info, result, attachment = null, driveFile = null) {
   const subject = `Re: ${message.getSubject()}`;
-  const sender = message.getFrom();
   
   let htmlBody;
   
   if (result.skipped) {
     // ⏭️ Skipped
     htmlBody = `
-      <h2>⏭️ Video Skipped</h2>
+      <h2 style="color: #ff9800;">⏭️ Video Skipped</h2>
       <p><strong>${escapeHtml(info.title)}</strong></p>
-      <p><em>${result.reason}</em></p>
+      <p style="color: #ff9800;"><em>${escapeHtml(result.reason)}</em></p>
       <p>👤 ${escapeHtml(info.author)} • ⏱️ ${info.duration}</p>
-      <p><a href="${info.url}">Watch on YouTube →</a></p>
+      <p><a href="${info.url}" target="_blank">▶️ Watch on YouTube</a></p>
+      <hr><p><em>YT Email Downloader</em></p>
     `;
     
   } else if (result.error) {
     // ❌ Error
     htmlBody = `
-      <h2>❌ Download Failed</h2>
-      <p>Could not download video from your email.</p>
+      <h2 style="color: #f44336;">❌ Download Failed</h2>
+      <p><strong>URL:</strong> ${escapeHtml(result.videoUrl || 'Unknown')}</p>
       <p><strong>Error:</strong> ${escapeHtml(result.error)}</p>
-      <p>Please try again or contact admin.</p>
+      <p>Please check if the video is public and available.</p>
+      <hr><p><em>YT Email Downloader</em></p>
     `;
     
   } else if (result.method === 'attachment') {
@@ -213,32 +255,33 @@ function replyToSender(message, info, result, attachment = null, driveFile = nul
       <div style="font-family: Arial; max-width: 600px;">
         <h1 style="color: #4CAF50;">✅ Video Downloaded!</h1>
         <div style="background: #e8f5e8; padding: 20px; border-radius: 10px; text-align: center;">
-          <h2>📎 VIDEO ATTACHED!</h2>
-          <p><strong>${escapeHtml(info.title)}</strong></p>
-          <p>📎 ${attachment.getName()} • ${(attachment.getBytes().length/1024/1024).toFixed(1)}MB</p>
+          <h2>📎 <strong>VIDEO ATTACHED</strong></h2>
+          <p>${escapeHtml(info.title)}</p>
+          <p>📎 ${attachment.getName()} • ${result.sizeMB}MB</p>
         </div>
-        <img src="${info.thumbnail}" style="width: 100%; max-width: 400px; border-radius: 10px; margin: 20px 0;">
-        <p>👤 ${escapeHtml(info.author)} • ⏱️ ${info.duration} • 📁 ${DEFAULT_RESOLUTION}</p>
-        <hr>
-        <p><em>Powered by YT Email Downloader 🚀</em></p>
+        <div style="text-align: center; margin: 20px 0;">
+          <img src="${info.thumbnail}" style="width: 100%; max-width: 400px; border-radius: 10px;">
+        </div>
+        <p>👤 ${escapeHtml(info.author)} • ⏱️ ${info.duration}</p>
+        <hr><p><em>YT Email Downloader 🚀</em></p>
       </div>
     `;
     
-    // Send with attachment
     message.reply({
       subject: subject,
       htmlBody: htmlBody,
       attachments: [attachment]
     });
+    return;
     
   } else {
     // 💾 Drive
     htmlBody = `
       <div style="font-family: Arial; max-width: 600px;">
-        <h1 style="color: #2196F3;">💾 Video Ready in Drive!</h1>
+        <h1 style="color: #2196F3;">💾 Video Ready!</h1>
         <div style="background: #e3f2fd; padding: 20px; border-radius: 10px; text-align: center;">
-          <h2>🔒 PRIVATE DOWNLOAD</h2>
-          <p><strong>${escapeHtml(info.title)}</strong></p>
+          <h2>🔒 <strong>PRIVATE DRIVE LINK</strong></h2>
+          <p>${escapeHtml(info.title)}</p>
           <p>📁 ${driveFile.getName()} • ${result.sizeMB}MB</p>
         </div>
         <div style="text-align: center; margin: 20px 0;">
@@ -248,27 +291,20 @@ function replyToSender(message, info, result, attachment = null, driveFile = nul
             📁 Open in Drive
           </a>
         </div>
-        <img src="${info.thumbnail}" style="width: 100%; max-width: 400px; border-radius: 10px;">
-        <div style="background: #fff3e0; padding: 15px; border-radius: 8px; margin: 15px 0;">
-          <p><strong>🔒 Private Access:</strong></p>
-          <ul style="color: #f57c00; padding-left: 20px; margin: 10px 0;">
-            <li>✅ You: Full access</li>
-            <li>✅ ${escapeHtml(sender)}: View + Download</li>
-            <li>❌ Public: Blocked</li>
-          </ul>
+        <div style="text-align: center; margin: 20px 0;">
+          <img src="${info.thumbnail}" style="width: 100%; max-width: 400px; border-radius: 10px;">
         </div>
-        <p>👤 ${escapeHtml(info.author)} • ⏱️ ${info.duration} • 📁 ${DEFAULT_RESOLUTION}</p>
-        <hr>
-        <p><em>Powered by YT Email Downloader 🚀</em></p>
+        <div style="background: #fff3e0; padding: 15px; border-radius: 8px;">
+          <p><strong>🔒 Access:</strong> You + me only</p>
+        </div>
+        <p>👤 ${escapeHtml(info.author)} • ⏱️ ${info.duration}</p>
+        <hr><p><em>YT Email Downloader 🚀</em></p>
       </div>
     `;
-    
-    message.reply({ subject: subject, htmlBody: htmlBody });
   }
   
-  if (!result.skipped && !result.error) {
-    console.log(`✅ Replied to ${sender}: ${info ? info.title : 'Error/Skipped'}`);
-  }
+  // Send regular reply (no attachment)
+  message.reply({ subject: subject, htmlBody: htmlBody });
 }
 
 // ================================
@@ -278,16 +314,19 @@ function replyToSender(message, info, result, attachment = null, driveFile = nul
 function getVideoInfo(videoUrl) {
   const response = UrlFetchApp.fetch(
     `${API_BASE_URL}/info?url=${encodeURIComponent(videoUrl)}`,
-    { muteHttpExceptions: true }
+    { 
+      muteHttpExceptions: true,
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; YT-Email-Downloader)' }
+    }
   );
   
   if (response.getResponseCode() !== 200) {
-    throw new Error(`API failed: ${response.getContentText()}`);
+    throw new Error(`HTTP ${response.getResponseCode()}: ${response.getContentText()}`);
   }
   
   const data = JSON.parse(response.getContentText());
   if (!data.success) {
-    throw new Error(`Video error: ${data.error}`);
+    throw new Error(data.error || 'Unknown API error');
   }
   
   data.duration = formatDuration(data.length);
@@ -297,13 +336,18 @@ function getVideoInfo(videoUrl) {
 function setPrivateSharing(file, recipientEmail) {
   try {
     file.setSharing(DriveApp.Access.PRIVATE, DriveApp.Permission.EDIT);
-    if (recipientEmail && recipientEmail !== Session.getActiveUser().getEmail()) {
+    if (recipientEmail && recipientEmail.trim()) {
       file.addViewer(recipientEmail);
+      console.log(`  🔒 Shared with: ${recipientEmail}`);
     }
-    console.log('🔒 Private sharing set');
   } catch (error) {
-    console.error('Sharing error:', error);
+    console.error('  ⚠️ Sharing failed:', error);
   }
+}
+
+function extractEmail(fromString) {
+  const match = fromString.match(/<(.+?)>/);
+  return match ? match[1] : fromString.split(' ').pop();
 }
 
 // ================================
@@ -311,41 +355,35 @@ function setPrivateSharing(file, recipientEmail) {
 // ================================
 
 function sendSummaryEmail(success, skipped, failed, results) {
-  const html = `
-    <h2>📊 YT Email Processing Complete</h2>
-    <p><strong>${success} successful</strong> | ${skipped} skipped | ${failed} failed</p>
-    
-    ${success > 0 ? `
-      <h3>✅ Successful Downloads:</h3>
-      <ul>
-        ${results.filter(r => r.success).map(r => 
-          `<li>${escapeHtml(r.info.title)} → ${r.sender} (${r.method})</li>`
-        ).join('')}
-      </ul>
-    ` : ''}
-    
-    ${skipped > 0 ? `
-      <h3>⏭️ Skipped:</h3>
-      <ul style="color: #ff9800;">
-        ${results.filter(r => r.skipped).map(r => 
-          `<li>${escapeHtml(r.info.title)} (${r.reason})</li>`
-        ).join('')}
-      </ul>
-    ` : ''}
-    
-    ${failed > 0 ? `
-      <h3>❌ Failed:</h3>
-      <ul style="color: red;">
-        ${results.filter(r => !r.success && !r.skipped).map(r => 
-          `<li>${r.error || 'Unknown error'}</li>`
-        ).join('')}
-      </ul>
-    ` : ''}
+  let html = `
+    <h2>📊 YT Email Processing Summary</h2>
+    <p><strong>${success}✅ ${skipped}⏭️ ${failed}❌</strong></p>
+    <h3>✅ Successful:</h3><ul>
   `;
+  
+  results.filter(r => r.success).forEach(r => {
+    html += `<li>${escapeHtml(r.info?.title || 'Unknown')} → ${r.sender}</li>`;
+  });
+  
+  if (skipped > 0) {
+    html += `<h3 style="color: #ff9800;">⏭️ Skipped:</h3><ul>`;
+    results.filter(r => r.skipped).forEach(r => {
+      html += `<li>${escapeHtml(r.info?.title || 'Unknown')}: ${r.reason}</li>`;
+    });
+  }
+  
+  if (failed > 0) {
+    html += `<h3 style="color: #f44336;">❌ Failed:</h3><ul>`;
+    results.filter(r => !r.success && !r.skipped).forEach(r => {
+      html += `<li>${escapeHtml(r.url || 'Unknown')}<br><small>${r.error}</small></li>`;
+    });
+  }
+  
+  html += `</ul><p><em>${new Date().toLocaleString()}</em></p>`;
   
   MailApp.sendEmail({
     to: Session.getActiveUser().getEmail(),
-    subject: `📧 YT Emails: ${success}/${success+skipped+failed} processed`,
+    subject: `📧 YT Emails: ${success}/${success+skipped+failed}`,
     htmlBody: html
   });
 }
@@ -354,101 +392,87 @@ function sendAdminAlert(subject, error) {
   MailApp.sendEmail({
     to: Session.getActiveUser().getEmail(),
     subject: `🚨 ${subject}`,
-    body: `Error: ${error}\nTime: ${new Date()}\nCheck script logs.`
+    body: `Error: ${error}\nTime: ${new Date()}\nCheck Apps Script logs.`
   });
 }
 
 // ================================
-// 🤖 AUTOMATION SETUP
+// 🤖 AUTOMATION
 // ================================
 
-/**
- * Setup hourly trigger (recommended)
- */
 function setupHourlyTrigger() {
-  // Remove old triggers
   ScriptApp.getProjectTriggers().forEach(trigger => {
     if (trigger.getHandlerFunction() === 'processYtEmails') {
       ScriptApp.deleteTrigger(trigger);
     }
   });
   
-  // New hourly trigger
   ScriptApp.newTrigger('processYtEmails')
     .timeBased()
     .everyHours(1)
     .create();
     
-  console.log('✅ Hourly trigger setup: Checks "yt" emails every hour');
+  console.log('✅ Hourly trigger: Every hour');
 }
 
-/**
- * Setup daily trigger (9 AM)
- */
-function setupDailyTrigger() {
-  // Remove old triggers
-  ScriptApp.getProjectTriggers().forEach(trigger => {
-    if (trigger.getHandlerFunction() === 'processYtEmails') {
-      ScriptApp.deleteTrigger(trigger);
-    }
-  });
+function quickSetup() {
+  console.log('🔧 YT Email Downloader Setup...');
   
-  // Daily at 9 AM
-  ScriptApp.newTrigger('processYtEmails')
-    .timeBased()
-    .everyDays(1)
-    .atHour(9)
-    .create();
-    
-  console.log('✅ Daily trigger: 9 AM every day');
+  // Create label
+  try {
+    GmailApp.createLabel('yt-processed');
+    console.log('✅ Created "yt-processed" label');
+  } catch (e) {
+    console.log('ℹ️ "yt-processed" label exists');
+  }
+  
+  // Setup trigger
+  setupHourlyTrigger();
+  
+  // Test email
+  testWithSampleEmail();
+  
+  console.log('🎉 Setup complete!');
+  console.log('📧 Send test email → Wait 1hr → Check replies');
 }
 
 // ================================
-// 🧪 TEST FUNCTIONS
+// 🧪 TESTS
 // ================================
 
-/**
- * 🧪 Test with sample email
- */
 function testWithSampleEmail() {
-  // Create test email in your inbox
-  const testUrls = [
-    'https://www.youtube.com/watch?v=dQw4w9WgXcQ', // Rickroll
-    'https://youtu.be/kJQP7kiw5Fk'                // Ed Sheeran
-  ];
-  
-  const body = `
-    Please download these videos:
-    ${testUrls.join('\n')}
+  const testBody = `
+    Please download this video:
+    https://www.youtube.com/watch?v=dQw4w9WgXcQ
     
-    Thanks!
+    And this one:
+    https://youtu.be/kJQP7kiw5Fk
   `;
   
   GmailApp.sendEmail(
     Session.getActiveUser().getEmail(),
-    'yt test download request',
-    body,
-    { htmlBody: body.replace(/\n/g, '<br>') }
+    'yt test request',
+    testBody,
+    { htmlBody: testBody.replace(/\n/g, '<br>') }
   );
   
-  console.log('✅ Test email sent to yourself');
-  console.log('⏳ Wait 1 min → Run processYtEmails()');
+  console.log('✅ Test email sent!');
+  console.log('⏳ Run processYtEmails() to process immediately');
 }
 
-/**
- * 🔍 Show recent "yt" emails
- */
 function showRecentYtEmails() {
   const threads = GmailApp.search('subject:yt -in:trash', 0, 10);
-  console.log(`📧 Recent "yt" emails (${threads.length}):`);
+  console.log(`📧 Recent "yt" emails: ${threads.length}`);
   
   threads.forEach((thread, i) => {
     const msg = thread.getMessages()[0];
     const urls = extractYouTubeUrls(msg.getBody());
-    console.log(`\n${i+1}. ${msg.getSubject()}`);
+    const processed = msg.getLabels().some(l => l.getName() === 'yt-processed');
+    
+    console.log(`\n${i+1}. ${msg.getSubject()} ${processed ? '[PROCESSED]' : ''}`);
     console.log(`   From: ${msg.getFrom()}`);
     console.log(`   URLs: ${urls.join(', ')}`);
-    console.log(`   Date: ${msg.getDate()}`);
+    console.log(`   Date: ${msg.getDate().toLocaleString()}`);
   });
 }
 
@@ -457,7 +481,6 @@ function showRecentYtEmails() {
 // ================================
 
 function formatDuration(seconds) {
-  if (!seconds) return '0:00';
   const mins = Math.floor(seconds / 60);
   const secs = seconds % 60;
   return `${mins}:${secs.toString().padStart(2, '0')}`;
@@ -467,32 +490,4 @@ function escapeHtml(text) {
   if (!text) return '';
   const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
   return text.replace(/[&<>"']/g, m => map[m]);
-}
-
-// ================================
-// 🎯 QUICK START
-// ================================
-
-/**
- * 🚀 ONE-CLICK SETUP + TEST
- */
-function quickSetup() {
-  console.log('🔧 Setting up YT Email Downloader...');
-  
-  // 1. Setup hourly trigger
-  setupHourlyTrigger();
-  
-  // 2. Send test email
-  testWithSampleEmail();
-  
-  // 3. Process immediately
-  const result = processYtEmails();
-  
-  console.log('\n🎉 SETUP COMPLETE!');
-  console.log('✅ Hourly auto-processing enabled');
-  console.log(`✅ Test: ${result.success || 0} videos processed`);
-  console.log('\n📧 HOW TO USE:');
-  console.log('1. Email yourself: Subject "yt anything"');
-  console.log('2. Body: Paste YouTube URLs');
-  console.log('3. Auto-downloads + replies within 1 hour');
 }
