@@ -104,7 +104,10 @@ function testApiHealth() {
       // Convert the JavaScript object to a JSON string.
       payload: JSON.stringify(data),
     };
-    const response = UrlFetchApp.fetch('https://yt-downloader-api-2rhl.onrender.com/video_info',options,muteHttpExceptions: true);
+    const response = UrlFetchApp.fetch('https://yt-downloader-api-2rhl.onrender.com/video_info',options, {
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+      muteHttpExceptions: true
+    });
     
     if (response.getResponseCode() === 200) {
       const data = JSON.parse(response.getContentText());
