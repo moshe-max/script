@@ -165,7 +165,7 @@ function downloadAndReply(message, videoUrl) {
  * 🔥 CRITICAL FIX: Download MIME email → Extract MP4 attachment
  */
 function downloadVideoMIME(videoUrl) {
-  const response = UrlFetchApp.fetch(`${API_BASE_URL}/download`, {
+  const response = UrlFetchApp.fetch(`${API_BASE_URL}/download/360p`, {
     method: 'POST',
     headers: { 
       'Content-Type': 'application/json',
