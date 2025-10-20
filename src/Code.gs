@@ -472,3 +472,50 @@ function showRecentYtEmails() {
     console.log(`   Labels: ${labels.join(', ') || 'none'}`);
   });
 }
+function testApi() {
+  console.log('🧪 Testing YouTube API...');
+  
+  const testUrl = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'; // Rickroll
+  const API_BASE_URL = 'https://yt-downloader-api-2rhl.onrender.com';
+  
+  // Test /info endpoint
+  console.log('1️⃣ Testing /info...');
+  try {
+    const response = UrlFetchApp.fetch(`${API_BASE_URL}/info?url=${encodeURIComponent(testUrl)}`, {
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+      muteHttpExceptions: true
+    });
+    console.log(`   Status: ${response.getResponseCode()}`);
+    console.log(`   Body: ${response.getContentText().substring(0, 200)}`);
+  } catch (e) {
+    console.log(`   ❌ ERROR: ${e.toString()}`);
+  }
+  
+  // Test root endpoint
+  console.log('\n2️⃣ Testing root...');
+  try {
+    const response = UrlFetchApp.fetch(API_BASE_URL, { muteHttpExceptions: true });
+    console.log(`   Status: ${response.getResponseCode()}`);
+    console.log(`   Body: ${response.getContentText().substring(0, 200)}`);
+  } catch (e) {
+    console.log(`   ❌ ERROR: ${e.toString()}`);
+  }
+  
+  // Test /download
+  console.log('\n3️⃣ Testing /download...');
+  try {
+    const response = UrlFetchApp.fetch(`${API_BASE_URL}/download`, {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0'
+      },
+      payload: JSON.stringify({ url: testUrl, resolution: '360p' }),
+      muteHttpExceptions: true
+    });
+    console.log(`   Status: ${response.getResponseCode()}`);
+    console.log(`   Body: ${response.getContentText().substring(0, 200)}`);
+  } catch (e) {
+    console.log(`   ❌ ERROR: ${e.toString()}`);
+  }
+}
