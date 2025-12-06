@@ -39,7 +39,7 @@ function getConstants() {
     ROLE_LIMITS: {
       // ADMIN is now explicitly set to Infinity for unlimited usage tracking.
       'admin': { downloads: Infinity, searches: Infinity, maxResults: 15, label: 'Admin' }, 
-      'pro plus': { downloads: 15, searches: 15, maxResults: 15, label: 'Pro Plus User' }, // 15 per day/search
+      'pro plus': { downloads: 25, searches: 25, maxResults: 15, label: 'Pro Plus User' }, // 15 per day/search
       'pro user': { downloads: 12, searches: 12, maxResults: 12, label: 'Pro User' }, // 12 per day/search
       'user': { downloads: 5, searches: 5, maxResults: 5, label: 'Standard User' }, // 5 per day/search
       'guest': { downloads: 1, searches: 5, maxResults: 5, label: 'Guest' } // Keeping guest as a low-limit tier
