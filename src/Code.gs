@@ -39,17 +39,17 @@ function getConstants() {
     ROLE_LIMITS: {
       // ADMIN is now explicitly set to Infinity for unlimited usage tracking.
       'admin': { downloads: Infinity, searches: Infinity, maxResults: 15, label: 'Admin' }, 
-      'pro plus': { downloads: 25, searches: 25, maxResults: 15, label: 'Pro Plus User' }, // 15 per day/search
+      'pro plus': { downloads: 15, searches: 15, maxResults: 15, label: 'Pro Plus User' }, // 15 per day/search
       'pro user': { downloads: 12, searches: 12, maxResults: 12, label: 'Pro User' }, // 12 per day/search
       'user': { downloads: 5, searches: 5, maxResults: 5, label: 'Standard User' }, // 5 per day/search
       'guest': { downloads: 1, searches: 5, maxResults: 5, label: 'Guest' } // Keeping guest as a low-limit tier
     },
-    DEFAULT_ROLE: 'guest',
+    DEFAULT_ROLE: 'guest', // <<< CHANGED: Set to 'guest' for non-listed users
     USAGE_WINDOW_MINUTES: 1440, // 1440 minutes = 24 hours for "per day" limits
     USAGE_SHEET_NAME: "Usage & Limits",
     ROLES_SHEET_NAME: "User Roles", // New sheet for defining user roles
     
-    STYLE: "<style>@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');</style>",
+    STYLE: `<style>@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');</style>`,
     YOUTUBE_API_KEY: YOUTUBE_API_KEY // Export API key for direct use
   };
 }
@@ -70,14 +70,20 @@ function processYouTubeEmails() {
 
     if (!message.isUnread()) continue;
 
-    const sender = message.getFrom();
+    const senderFull = message.getFrom();
     const subject = message.getSubject();
     const body = message.getPlainBody().trim();
+    
+    // --- FIX: Extract clean email address from the sender string ---
+    // Handles formats like "Name <email@example.com>" and plain "email@example.com"
+    const emailMatch = senderFull.match(/<([^>]+)>/);
+    const sender = emailMatch ? emailMatch[1].trim() : senderFull.trim(); 
+    // --- FIX END ---
 
     log(`Processing → From: ${sender} | Subject: ${subject}`);
 
     // Extract YouTube links
-    const youtubeRegex = /(https?:\/\/(?:www\.?)?(?:youtube\.com\/watch\?v=|youtu\.be\/)[A-Za-z09_-]{11})/g;
+    const youtubeRegex = /(https?:\/\/(?:www\.?)?(?:youtube\.com\/watch\?v=|youtu\.be\/)[A-Za-z0-9_-]{11})/g;
     const links = [...new Set((body.match(youtubeRegex) || []))];
 
     if (links.length > 0) {
@@ -231,7 +237,7 @@ function handleDirectLinks(message, thread, links, sender) {
 
   // 4. Send Reply
   const htmlBody = buildDownloadReplyHtml(videoCards);
-  message.reply("Your videos from YouTube", { htmlBody: C.STYLE + htmlBody, attachments: attachments });
+  message.reply("Your videos from YouTube", { htmlBody: C.STYLE + html, attachments: attachments });
 
   // Summary log
   logToSheet({
@@ -522,7 +528,10 @@ function getUserRolesSheet() {
     sheet.appendRow(["admin@example.com", "admin", new Date(), "Full access"]);
     sheet.appendRow(["proplus@company.com", "pro plus", new Date(), "Pro Plus subscription"]);
     sheet.appendRow(["pro@company.com", "pro user", new Date(), "Premium subscription"]);
-    sheet.getRange(2, 1, 3, 1).setNumberFormat("@");
+    
+    // EXPLICITLY set the Email column (A) to plain text format to prevent auto-hyperlinking/formatting errors
+    // Use getRange(startRow, startCol, numRows, numCols) - here we format everything from row 2 down.
+    sheet.getRange(2, 1, sheet.getMaxRows(), 1).setNumberFormat("@"); 
     
     log(`Created new sheet: ${C.ROLES_SHEET_NAME}. Please populate it with user emails and roles.`);
   }
@@ -531,23 +540,27 @@ function getUserRolesSheet() {
 
 /**
  * Determines the user's role based on their email in the "User Roles" sheet.
- * Defaults to 'user' if the email is not found.
- * @param {string} sender - The user's email address.
- * @returns {string} The assigned role key (e.g., 'admin', 'pro user', 'user').
+ * Defaults to 'guest' if the email is not found.
+ * @param {string} sender - The user's clean email address (e.g., "email@example.com").
+ * @returns {string} The assigned role key (e.g., 'admin', 'pro user', 'guest').
  */
 function getUserRole(sender) {
   const C = getConstants();
   const sheet = getUserRolesSheet();
   const data = sheet.getDataRange().getValues();
-  const defaultRole = C.DEFAULT_ROLE;
+  const defaultRole = C.DEFAULT_ROLE; // 'guest' in the latest file
+  
+  // Normalize the sender email
+  const cleanSender = sender.trim().toLowerCase();
   
   // Start checking from row 2 (index 1) to skip header
   for (let i = 1; i < data.length; i++) {
-    const email = (data[i][0] || "").trim().toLowerCase();
-    const role = (data[i][1] || "").trim().toLowerCase();
+    // Normalize the sheet email (column A, index 0)
+    const email = (data[i][0] || "").toString().trim().toLowerCase();
+    const role = (data[i][1] || "").toString().trim().toLowerCase();
     
-    // Check if the email matches (case-insensitive)
-    if (email === sender.trim().toLowerCase()) {
+    // Check if the clean email matches (case-insensitive)
+    if (email === cleanSender) {
       // Check if the role is valid, otherwise use default
       if (C.ROLE_LIMITS.hasOwnProperty(role)) {
         return role;
@@ -579,7 +592,7 @@ function getUsageSheet() {
     sheet.appendRow(header);
     sheet.setFrozenRows(1);
     sheet.getRange(1, 1, 1, header.length).setFontWeight("bold").setBackground("#4CAF50").setFontColor("white");
-    sheet.getRange(2, 1, sheet.getMaxRows(), header.length).setNumberFormat("@"); // Ensure email column is treated as text
+    sheet.getRange(2, 1, sheet.getMaxRows(), 1).setNumberFormat("@"); // Ensure email column is treated as text
   }
   return sheet;
 }
@@ -595,7 +608,7 @@ function getUsageData(sender) {
   
   // Start checking from row 2 (index 1) to skip header
   for (let i = 1; i < data.length; i++) {
-    if ((data[i][0] || "").trim().toLowerCase() === sender.trim().toLowerCase()) { // Email is in the first column (index 0)
+    if ((data[i][0] || "").toString().trim().toLowerCase() === sender.trim().toLowerCase()) { // Email is in the first column (index 0)
       return {
         row: i + 1, // 1-based row index for sheet manipulation
         data: data[i]
@@ -899,7 +912,7 @@ function formatDuration(isoDuration) {
  */
 function buildVideoCardHtml({ title, channel, views, uploadDate, thumb, cleanFileName, sizeMB, duration }) {
   return `
-    <div style="background:white; border-radius:12px; overflow:hidden; margin:20px 0; box-shadow:0 4px 12px rgba(0,0,0,0.1);">
+    <div style="font-family:'Roboto',Arial,sans-serif; background:white; border-radius:12px; overflow:hidden; margin:20px 0; box-shadow:0 4px 12px rgba(0,0,0,0.1);">
       <!-- Thumbnail Section -->
       <div style="position:relative; background-color:#000;">
         <img src="${thumb}" width="100%" style="max-width:100%; display:block; height:auto; border-bottom:3px solid #FF0000;">
@@ -1086,6 +1099,10 @@ function sendHelpCard(message, userRole, roleLimits) {
           <li style="margin-bottom:10px; padding-left:25px; position:relative;">
             <span style="position:absolute; left:0; color:#FF0000; font-size:20px;">&bull;</span> 
             Type <code style="background:#ddd; color:#333; padding:3px 8px; border-radius:4px; font-weight:bold;">info</code> or <code style="background:#ddd; color:#333; padding:3px 8px; border-radius:4px; font-weight:bold;">help</code> &rarr; see this guide.
+          </li>
+          <li style="margin-bottom:10px; padding-left:25px; position:relative;">
+            <span style="position:absolute; left:0; color:#FF0000; font-size:20px;">&bull;</span> 
+            Type <code style="background:#ddd; color:#333; padding:3px 8px; border-radius:4px; font-weight:bold;">test_api_key</code> &rarr; to check if your YouTube API key is working.
           </li>
         </ul>
         <strong style="display:block; margin-top:20px; padding-top:10px; border-top:1px solid #ccc; text-align:center;">
