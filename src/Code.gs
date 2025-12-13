@@ -7,6 +7,9 @@
  * 2. If no links are found, it performs a YouTube search and replies with interactive results.
  *
  * Implements role-based usage limits read from the "User Roles" sheet.
+ *
+ * FIX: Replaced all ES6 Template Literals (using backticks) with standard string concatenation
+ * to ensure compatibility with the Google Apps Script V8 runtime environment.
  */
 
 // ====================================================================
@@ -42,7 +45,8 @@ function getConstants() {
     USAGE_SHEET_NAME: "Usage & Limits",
     ROLES_SHEET_NAME: "User Roles",
     
-    STYLE: `<style>@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');</style>`,
+    // Line 52 fix: Replaced Template Literal with single-quoted string
+    STYLE: '<style>@import url(\'https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap\');</style>',
     YOUTUBE_API_KEY: YOUTUBE_API_KEY // Export API key for direct use
   };
 }
@@ -55,7 +59,7 @@ function processYouTubeEmails() {
   log("=== Bot started ===");
 
   const threads = GmailApp.search('is:unread subject:yt');
-  log(`Found ${threads.length} unread thread(s) with "yt" in subject`);
+  log("Found " + threads.length + " unread thread(s) with \"yt\" in subject");
 
   for (const thread of threads) {
     const messages = thread.getMessages();
@@ -71,7 +75,7 @@ function processYouTubeEmails() {
     const emailMatch = senderFull.match(/<([^>]+)>/);
     const sender = emailMatch ? emailMatch[1].trim() : senderFull.trim(); 
 
-    log(`Processing -> From: ${sender} | Subject: ${subject}`);
+    log("Processing -> From: " + sender + " | Subject: " + subject);
 
     // Extract YouTube links
     const youtubeRegex = /(https?:\/\/(?:www\.?)?(?:youtube\.com\/watch\?v=|youtu\.be\/)[A-Za-z0-9_-]{11})/g;
@@ -115,21 +119,21 @@ function handleDirectLinks(message, thread, links, sender) {
       sender: sender,
       requestType: "Direct Links",
       queryOrUrls: links.join(", "),
-      actionDetail: `Rejected: ${usageCheck.message} (Role: ${userRole})`,
+      actionDetail: "Rejected: " + usageCheck.message + " (Role: " + userRole + ")",
       status: "LIMIT EXCEEDED"
     });
     return; // Stop processing this request
   }
   // ------------------------------
 
-  log(`Found ${links.length} direct YouTube link(s). Role: ${userRole}`);
+  log("Found " + links.length + " direct YouTube link(s). Role: " + userRole);
   
   // --- LOGGING: Log the start of the direct link request ---
   logToSheet({
     sender: sender,
     requestType: "Direct Links",
     queryOrUrls: links.join(", "),
-    actionDetail: `${links.length} links requested (Role: ${userRole})`,
+    actionDetail: links.length + " links requested (Role: " + userRole + ")",
     status: "Request Started"
   });
   // ---------------------------------------------------------------------
@@ -141,22 +145,22 @@ function handleDirectLinks(message, thread, links, sender) {
 
   for (const url of links) {
     const videoId = url.includes("v=") ? url.split("v=")[1].substring(0, 11) : url.split("/").pop().substring(0, 11);
-    log(`Attempting to download ${videoId}...`);
+    log("Attempting to download " + videoId + "...");
 
     try {
       // 1. Download Video Blob
-      const downloadUrl = `${C.RAILWAY_ENDPOINT}/download?url=${encodeURIComponent(url)}`;
+      const downloadUrl = C.RAILWAY_ENDPOINT + "/download?url=" + encodeURIComponent(url);
       const response = UrlFetchApp.fetch(downloadUrl, { muteHttpExceptions: true });
 
       if (response.getResponseCode() !== 200) {
-        throw new Error(`Download failed with status code ${response.getResponseCode()}`);
+        throw new Error("Download failed with status code " + response.getResponseCode());
       }
 
       const blob = response.getBlob();
       const sizeMB = Math.round(blob.getBytes().length / (1024 * 1024) * 10) / 10;
 
       // 2. Get Video Metadata from YouTube API
-      const infoUrl = `${C.YOUTUBE_API_BASE}/videos?part=snippet,statistics,contentDetails&id=${videoId}&key=${C.YOUTUBE_API_KEY}`;
+      const infoUrl = C.YOUTUBE_API_BASE + "/videos?part=snippet,statistics,contentDetails&id=" + videoId + "&key=" + C.YOUTUBE_API_KEY;
       const infoRes = UrlFetchApp.fetch(infoUrl);
       const infoData = JSON.parse(infoRes.getContentText()).items[0];
 
@@ -172,7 +176,7 @@ function handleDirectLinks(message, thread, links, sender) {
       const isoDuration = infoData.contentDetails?.duration;
       const duration = formatDuration(isoDuration);
 
-      const cleanFileName = `${title} - ${channel}.mp4`;
+      const cleanFileName = title + " - " + channel + ".mp4";
 
       // 3. Check Size Limit and Attach
       if (totalSizeMB + sizeMB <= C.MAX_ATTACHMENT_SIZE_MB) {
@@ -194,7 +198,7 @@ function handleDirectLinks(message, thread, links, sender) {
           status: "Download Success"
         });
       } else {
-        videoCards.push(`<p style="color:#FF0000; font-size:14px; margin-top:10px;">More videos were skipped due to the Gmail ${C.MAX_ATTACHMENT_SIZE_MB} MB size limit.</p>`);
+        videoCards.push("<p style='color:#FF0000; font-size:14px; margin-top:10px;'>More videos were skipped due to the Gmail " + C.MAX_ATTACHMENT_SIZE_MB + " MB size limit.</p>");
         
         // LOGGING IMPROVEMENT: Log skip due to size
         logToSheet({
@@ -202,7 +206,7 @@ function handleDirectLinks(message, thread, links, sender) {
           requestType: "Direct Links",
           videoId: videoId,
           title: title,
-          actionDetail: `Skipped: Size limit exceeded`,
+          actionDetail: "Skipped: Size limit exceeded",
           sizeMb: sizeMB,
           status: "Download Skipped"
         });
@@ -210,15 +214,15 @@ function handleDirectLinks(message, thread, links, sender) {
       }
 
     } catch (e) {
-      videoCards.push(`<div style="background:#fff3f3; color:#c00; padding:15px; border-radius:8px; border:1px solid #c00; margin:10px 0;">Failed to download ${url}: ${e.toString()}</div>`);
-      log(`Failed ${videoId}: ${e.toString()}`);
+      videoCards.push("<div style='background:#fff3f3; color:#c00; padding:15px; border-radius:8px; border:1px solid #c00; margin:10px 0;'>Failed to download " + url + ": " + e.toString() + "</div>");
+      log("Failed " + videoId + ": " + e.toString());
       
       // LOGGING IMPROVEMENT: Log failure
       logToSheet({
         sender: sender,
         requestType: "Direct Links",
         videoId: videoId,
-        actionDetail: `URL: ${url} | Error: ${e.toString()}`,
+        actionDetail: "URL: " + url + " | Error: " + e.toString(),
         status: "Download Failed"
       });
     }
@@ -232,7 +236,7 @@ function handleDirectLinks(message, thread, links, sender) {
   logToSheet({
     sender: sender,
     requestType: "Direct Links",
-    actionDetail: `Attached ${attachedCount} videos (${(totalSizeMB).toFixed(1)} MB) of ${links.length} total`,
+    actionDetail: "Attached " + attachedCount + " videos (" + (totalSizeMB).toFixed(1) + " MB) of " + links.length + " total",
     sizeMb: totalSizeMB,
     status: "Batch Summary"
   });
@@ -266,14 +270,14 @@ function handleSearchQuery(message, thread, originalBody, sender) {
 
   // 1. Special command: info / help
   if (["info", "help", "how", "instructions", "?"].includes(query.toLowerCase())) {
-    log(`User requested help. Role: ${userRole}`);
+    log("User requested help. Role: " + userRole);
     sendHelpCard(message, userRole, roleLimits);
     
     logToSheet({
       sender: sender,
       requestType: "Smart Search",
       queryOrUrls: query,
-      actionDetail: `Instructions sent (Role: ${userRole})`,
+      actionDetail: "Instructions sent (Role: " + userRole + ")",
       status: "Help Requested"
     });
     return;
@@ -287,7 +291,7 @@ function handleSearchQuery(message, thread, originalBody, sender) {
       sender: sender,
       requestType: "Smart Search",
       queryOrUrls: query,
-      actionDetail: `Rejected: ${usageCheck.message} (Role: ${userRole})`,
+      actionDetail: "Rejected: " + usageCheck.message + " (Role: " + userRole + ")",
       status: "LIMIT EXCEEDED"
     });
     return; // Stop processing this request
@@ -299,16 +303,16 @@ function handleSearchQuery(message, thread, originalBody, sender) {
     sender: sender,
     requestType: "Smart Search",
     queryOrUrls: query,
-    actionDetail: `Search for: "${query}" (Role: ${userRole}, Max Results: ${maxResults})`,
+    actionDetail: "Search for: \"" + query + "\" (Role: " + userRole + ", Max Results: " + maxResults + ")",
     status: "Request Started"
   });
   // -----------------------------------------------------------------
 
   // 3. Normal smart search
-  log(`Smart search -> extracted query: "${query}"`);
+  log("Smart search -> extracted query: \"" + query + "\"");
 
   // Use the dynamic maxResults based on the user's role
-  const searchUrl = `${C.YOUTUBE_API_BASE}/search?part=snippet&maxResults=${maxResults}&q=${encodeURIComponent(query)}&type=video&key=${C.YOUTUBE_API_KEY}`;
+  const searchUrl = C.YOUTUBE_API_BASE + "/search?part=snippet&maxResults=" + maxResults + "&q=" + encodeURIComponent(query) + "&type=video&key=" + C.YOUTUBE_API_KEY;
 
   try {
     const searchResponse = UrlFetchApp.fetch(searchUrl);
@@ -320,7 +324,7 @@ function handleSearchQuery(message, thread, originalBody, sender) {
     
     if (videoIds.length > 0) {
       // Fetch statistics and contentDetails for all results in a single, efficient API call
-      const videoInfoUrl = `${C.YOUTUBE_API_BASE}/videos?part=statistics,contentDetails&id=${videoIds}&key=${C.YOUTUBE_API_KEY}`;
+      const videoInfoUrl = C.YOUTUBE_API_BASE + "/videos?part=statistics,contentDetails&id=" + videoIds + "&key=" + C.YOUTUBE_API_KEY;
       const infoResponse = UrlFetchApp.fetch(videoInfoUrl);
       const infoData = JSON.parse(infoResponse.getContentText());
       
@@ -343,39 +347,39 @@ function handleSearchQuery(message, thread, originalBody, sender) {
     }
     // --- END BATCH FETCH ---
 
-    log(`Search returned ${items.length} results`);
+    log("Search returned " + items.length + " results");
 
     const html = buildSearchResultsHtml(items, message.getTo(), query);
-    message.reply(`Search results for: "${query}"`, { htmlBody: C.STYLE + html });
+    message.reply("Search results for: \"" + query + "\"", { htmlBody: C.STYLE + html });
 
     logToSheet({
       sender: sender,
       requestType: "Smart Search",
       queryOrUrls: query,
-      actionDetail: `${items.length} results returned`,
+      actionDetail: items.length + " results returned",
       status: "Search Success"
     });
   } catch (e) {
     // Check if the error is specifically the 400 API key error
     if (e.message.includes("returned code 400") && e.message.includes("API key not valid")) {
-       log(`Search failed: API Key Error (400)`);
+       log("Search failed: API Key Error (400)");
        sendApiKeyMissingReply(message, "Search Request", true); // Send specific failure message
        logToSheet({
           sender: sender,
           requestType: "Smart Search",
           queryOrUrls: query,
-          actionDetail: `Error: API Key Invalid (400)`,
+          actionDetail: "Error: API Key Invalid (400)",
           status: "Search Failed"
        });
        return;
     }
     
-    log(`Search failed: ${e.message}`);
+    log("Search failed: " + e.message);
     logToSheet({
       sender: sender,
       requestType: "Smart Search",
       queryOrUrls: query,
-      actionDetail: `Error: ${e.message}`,
+      actionDetail: "Error: " + e.message,
       status: "Search Failed"
     });
     message.reply("Search failed -- an unexpected error occurred. Check the logs for details.");
@@ -400,7 +404,7 @@ function testApiKeyStatus(message, sender, apiKey) {
         icon = "\u26A0\uFE0F"; // Warning emoji
     } else {
         // Attempt a simple, low-cost API call (e.g., search for a common term with maxResults=1)
-        const testUrl = `${C.YOUTUBE_API_BASE}/search?part=id&maxResults=1&q=test&key=${apiKey}`;
+        const testUrl = C.YOUTUBE_API_BASE + "/search?part=id&maxResults=1&q=test&key=" + apiKey;
         
         try {
             const response = UrlFetchApp.fetch(testUrl, { muteHttpExceptions: true });
@@ -423,31 +427,31 @@ function testApiKeyStatus(message, sender, apiKey) {
                  color = "#F44336"; // Red
                  icon = "\uD83D\uDED1"; // Stop sign emoji
             } else {
-                status = `API Test Failed (${responseCode})`;
-                details = `Received unexpected HTTP status code: ${responseCode}. Raw response: ${response.getContentText().substring(0, 100)}...`;
+                status = "API Test Failed (" + responseCode + ")";
+                details = "Received unexpected HTTP status code: " + responseCode + ". Raw response: " + response.getContentText().substring(0, 100) + "...";
                 color = "#FF9800"; // Amber
                 icon = "\u2753"; // Question mark emoji
             }
         } catch (e) {
             status = "Connection Error";
-            details = `Failed to connect to the Google API endpoint: ${e.toString()}`;
+            details = "Failed to connect to the Google API endpoint: " + e.toString();
             color = "#757575"; // Grey
             icon = "\uD83D\uDD0C"; // Plug emoji
         }
     }
 
-    const html = `
-      <div style="font-family:'Roboto',Arial,sans-serif; max-width:600px; margin:20px auto; padding:25px; background:#f5f5f5; color:#333; border:1px solid #ddd; border-radius:12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1);">
-        <h2 style="color:${color}; font-size:24px; margin-bottom:15px; border-bottom:2px solid #eee; padding-bottom:10px; text-align:center;">${icon} API Key Test Result ${icon}</h2>
-        <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee;">
-            <p style="font-size:16px; margin-bottom:10px;"><strong>Status:</strong> <span style="color:${color}; font-weight:bold;">${status}</span></p>
-            <p style="font-size:14px; line-height:1.5;"><strong>Details:</strong> ${details}</p>
-        </div>
-        <p style="font-size:12px; color:#777; margin-top:20px; text-align:center;">
-          Run this test again by sending an email with the subject "yt" and body: <code style="background:#f0f0f0; padding:2px 5px; border-radius:3px;">test_api_key</code>
-        </p>
-      </div>
-    `;
+    // Replaced template literal with string concatenation
+    const html = ""
+      + "<div style='font-family:\"Roboto\",Arial,sans-serif; max-width:600px; margin:20px auto; padding:25px; background:#f5f5f5; color:#333; border:1px solid #ddd; border-radius:12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1);'>"
+      + "<h2 style='color:" + color + "; font-size:24px; margin-bottom:15px; border-bottom:2px solid #eee; padding-bottom:10px; text-align:center;'>" + icon + " API Key Test Result " + icon + "</h2>"
+      + "<div style='background:white; padding:20px; border-radius:8px; border:1px solid #eee;'>"
+      + "<p style='font-size:16px; margin-bottom:10px;'><strong>Status:</strong> <span style='color:" + color + "; font-weight:bold;'>" + status + "</span></p>"
+      + "<p style='font-size:14px; line-height:1.5;'><strong>Details:</strong> " + details + "</p>"
+      + "</div>"
+      + "<p style='font-size:12px; color:#777; margin-top:20px; text-align:center;'>"
+      + "Run this test again by sending an email with the subject \"yt\" and body: <code style='background:#f0f0f0; padding:2px 5px; border-radius:3px;'>test_api_key</code>"
+      + "</p>"
+      + "</div>";
 
     message.reply("YouTube API Key Status Check", { htmlBody: C.STYLE + html });
     
@@ -456,7 +460,7 @@ function testApiKeyStatus(message, sender, apiKey) {
       sender: sender,
       requestType: "API Key Test",
       queryOrUrls: "test_api_key",
-      actionDetail: `Key Status: ${status} | Details: ${details}`,
+      actionDetail: "Key Status: " + status + " | Details: " + details,
       status: status
     });
 }
@@ -471,24 +475,24 @@ function sendApiKeyMissingReply(message, requestType, isInvalid = false) {
         ? "The key in Script Properties is being rejected by the YouTube API (HTTP 400 error). Please verify the key's accuracy and ensure the 'YouTube Data API v3' service is enabled in your Google Cloud Console."
         : "The 'YOUTUBE_API_KEY' property is not found in Script Properties. This key is required for all searches and for fetching video metadata during downloads.";
     
-    const html = `
-      <div style="font-family:'Roboto',Arial,sans-serif; max-width:600px; margin:20px auto; padding:25px; background:#fff0f0; color:#c00; border:2px solid #c00; border-radius:12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1);">
-        <h2 style="color:#c00; font-size:24px; margin-bottom:15px; text-align:center;">\u274C ${status}</h2>
-        <p style="font-size:16px; color:#333; line-height:1.6; margin-bottom:20px;">
-          Your recent <strong>${requestType}</strong> failed.
-        </p>
-        <div style="background:white; padding:15px; border-radius:8px; border:1px solid #fdd;">
-            <strong style="color:#c00; display:block; margin-bottom:5px;">Required Action:</strong>
-            <p style="font-size:14px; color:#555;">${details}</p>
-            <p style="font-size:14px; color:#555; margin-top:10px;">
-              To diagnose further, send an email with the subject "yt" and the body: <code style="background:#f0f0f0; padding:2px 5px; border-radius:3px;">test_api_key</code>
-            </p>
-        </div>
-      </div>
-    `;
+    // Replaced template literal with string concatenation
+    const html = ""
+      + "<div style='font-family:\"Roboto\",Arial,sans-serif; max-width:600px; margin:20px auto; padding:25px; background:#fff0f0; color:#c00; border:2px solid #c00; border-radius:12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1);'>"
+      + "<h2 style='color:#c00; font-size:24px; margin-bottom:15px; text-align:center;'>\u274C " + status + "</h2>"
+      + "<p style='font-size:16px; color:#333; line-height:1.6; margin-bottom:20px;'>"
+      + "Your recent <strong>" + requestType + "</strong> failed."
+      + "</p>"
+      + "<div style='background:white; padding:15px; border-radius:8px; border:1px solid #fdd;'>"
+      + "<strong style='color:#c00; display:block; margin-bottom:5px;'>Required Action:</strong>"
+      + "<p style='font-size:14px; color:#555;'>" + details + "</p>"
+      + "<p style='font-size:14px; color:#555; margin-top:10px;'>"
+      + "To diagnose further, send an email with the subject \"yt\" and the body: <code style='background:#f0f0f0; padding:2px 5px; border-radius:3px;'>test_api_key</code>"
+      + "</p>"
+      + "</div>"
+      + "</div>";
 
     message.reply("Action Blocked: API Key Error", { htmlBody: C.STYLE + html });
-    log(`Blocked request due to ${status}`);
+    log("Blocked request due to " + status);
 }
 
 // ====================================================================
@@ -521,7 +525,7 @@ function getUserRolesSheet() {
     // EXPLICITLY set the Email column (A) to plain text format to prevent formatting errors
     sheet.getRange(2, 1, sheet.getMaxRows(), 1).setNumberFormat("@"); 
     
-    log(`Created new sheet: ${C.ROLES_SHEET_NAME}. Please populate it with user emails and roles.`);
+    log("Created new sheet: " + C.ROLES_SHEET_NAME + ". Please populate it with user emails and roles.");
   }
   
   // Re-apply formatting on existing sheets just in case of deployment issues
@@ -558,7 +562,7 @@ function getUserRole(sender) {
       if (C.ROLE_LIMITS.hasOwnProperty(role)) {
         return role;
       } else {
-        log(`Warning: Role "${role}" for ${sender} is invalid. Defaulting to "${defaultRole}".`);
+        log("Warning: Role \"" + role + "\" for " + sender + " is invalid. Defaulting to \"" + defaultRole + "\".");
         return defaultRole;
       }
     }
@@ -688,11 +692,11 @@ function checkAndIncrementUsage(sender, type, count, userRole, roleLimits) {
         // Calculate time left in the window
         const timeRemainingMs = windowMs - timeSinceLastUpdateMs;
         const minutes = Math.ceil(timeRemainingMs / 60000);
-        const retryWait = `${minutes} minute${minutes !== 1 ? 's' : ''}`;
+        const retryWait = minutes + " minute" + (minutes !== 1 ? 's' : '');
         
         return {
           allowed: false,
-          message: `You have reached your ${roleLimits.label} limit of ${MAX_LIMIT} ${type} requests in the last 24 hours (1 day).`,
+          message: "You have reached your " + roleLimits.label + " limit of " + MAX_LIMIT + " " + type + " requests in the last 24 hours (1 day).",
           retryWait: retryWait,
           currentDownloads: downloads,
           currentSearches: searches,
@@ -762,25 +766,26 @@ function sendLimitExceededReply(message, usageCheck, userRole, roleLimits) {
   const currentSearches = roleLimits.searches === Infinity ? 'N/A' : usageCheck.currentSearches;
 
 
-  const html = `
-    <div style="font-family:'Roboto',Arial,sans-serif; max-width:600px; margin:20px auto; padding:25px; background:#fef3f3; color:#a00; border:1px solid #f00; border-radius:12px; text-align:center; box-shadow: 0 4px 10px rgba(0,0,0,0.1);">
-      <h2 style="color:#d00; font-size:24px; margin-bottom:10px;">\uD83D\uDED1 Usage Limit Reached</h2>
-      <p style="font-size:16px; color:#555; line-height:1.6;">
-        ${usageCheck.message}
-      </p>
-      <div style="background:#fff; padding:15px; border-radius:8px; margin:20px 0;">
-          <strong style="display:block; font-size:18px; color:#111; margin-bottom:10px;">Your Current Role: ${roleLimits.label} (${userRole})</strong>
-          <ul style="list-style:none; padding:0; margin:0; text-align:left;">
-            <li style="margin-bottom:5px; color:#333;">Downloads Limit: <strong style="float:right;">${currentDownloads} / ${displayDownloads}</strong></li>
-            <li style="color:#333;">Searches Limit: <strong style="float:right;">${currentSearches} / ${displaySearches}</strong></li>
-            <li style="color:#333;">Search Results Max: <strong style="float:right;">${roleLimits.maxResults}</strong></li>
-          </ul>
-      </div>
-      <p style="font-size:14px; margin-top:20px; color:#777;">
-        You can try again in approximately <strong style="color:#333;">${usageCheck.retryWait}</strong>.
-      </p>
-    </div>
-  `;
+  // Replaced template literal with string concatenation
+  const html = ""
+    + "<div style='font-family:\"Roboto\",Arial,sans-serif; max-width:600px; margin:20px auto; padding:25px; background:#fef3f3; color:#a00; border:1px solid #f00; border-radius:12px; text-align:center; box-shadow: 0 4px 10px rgba(0,0,0,0.1);'>"
+    + "<h2 style='color:#d00; font-size:24px; margin-bottom:10px;'>\uD83D\uDED1 Usage Limit Reached</h2>"
+    + "<p style='font-size:16px; color:#555; line-height:1.6;'>"
+    + usageCheck.message
+    + "</p>"
+    + "<div style='background:#fff; padding:15px; border-radius:8px; margin:20px 0;'>"
+    + "<strong style='display:block; font-size:18px; color:#111; margin-bottom:10px;'>Your Current Role: " + roleLimits.label + " (" + userRole + ")</strong>"
+    + "<ul style='list-style:none; padding:0; margin:0; text-align:left;'>"
+    + "<li style='margin-bottom:5px; color:#333;'>Downloads Limit: <strong style='float:right;'>" + currentDownloads + " / " + displayDownloads + "</strong></li>"
+    + "<li style='color:#333;'>Searches Limit: <strong style='float:right;'>" + currentSearches + " / " + displaySearches + "</strong></li>"
+    + "<li style='color:#333;'>Search Results Max: <strong style='float:right;'>" + roleLimits.maxResults + "</strong></li>"
+    + "</ul>"
+    + "</div>"
+    + "<p style='font-size:14px; margin-top:20px; color:#777;'>"
+    + "You can try again in approximately <strong style='color:#333;'>" + usageCheck.retryWait + "</strong>."
+    + "</p>"
+    + "</div>";
+
   message.reply("Action Rejected: Usage Limit Reached", { htmlBody: C.STYLE + html });
 }
 
@@ -820,7 +825,7 @@ function logToSheet(logData) {
     ];
 
     sheet.appendRow(row);
-    console.log(`LOGGED to permanent sheet: ${logData.status} - ${logData.actionDetail || logData.requestType}`);
+    console.log("LOGGED to permanent sheet: " + logData.status + " - " + (logData.actionDetail || logData.requestType));
   } catch (e) {
     console.error("LOGGING FAILED:", e.toString());
   }
@@ -904,63 +909,58 @@ function formatDuration(isoDuration) {
  * Builds the HTML content for a single video attachment card.
  */
 function buildVideoCardHtml({ title, channel, views, uploadDate, thumb, cleanFileName, sizeMB, duration }) {
-  return `
-    <div style="font-family:'Roboto',Arial,sans-serif; background:white; border-radius:12px; overflow:hidden; margin:20px 0; box-shadow:0 4px 12px rgba(0,0,0,0.1);">
-      <!-- Thumbnail Section -->
-      <div style="position:relative; background-color:#000;">
-        <img src="${thumb}" width="100%" style="max-width:100%; display:block; height:auto; border-bottom:3px solid #FF0000;">
-        <div style="position:absolute; bottom:8px; right:8px; background:rgba(0,0,0,0.8); color:white; padding:2px 6px; border-radius:4px; font-size:12px;">360p MP4</div>
-      </div>
-
-      <!-- Details Section -->
-      <div style="padding:16px;">
-        <div style="font-weight:700; font-size:18px; color:#111; margin-bottom:8px; line-height:1.3;">${title}</div>
-        <div style="color:#606060; font-size:14px; margin:4px 0;">
-          <strong style="color:#000;">${channel}</strong> \u2022 Duration: ${duration} \u2022 ${views} views \u2022 ${uploadDate}
-        </div>
-        
-        <!-- Status -->
-        <div style="margin-top:12px; padding-top:12px; border-top:1px solid #eee;">
-          <div style="display:flex; justify-content:space-between; align-items:center;">
-            <strong style="color:#0f9d58; font-size:15px;">\u2713 Download Success</strong>
-            <span style="color:#555; font-size:13px;">${sizeMB} MB</span>
-          </div>
-          <p style="margin:4px 0 0; color:#333; font-size:14px;">File: <strong>${cleanFileName}</strong></p>
-        </div>
-      </div>
-    </div>
-  `;
+  // Replaced template literal with string concatenation
+  return ""
+    + "<div style='font-family:\"Roboto\",Arial,sans-serif; background:white; border-radius:12px; overflow:hidden; margin:20px 0; box-shadow:0 4px 12px rgba(0,0,0,0.1);'>"
+    + "<!-- Thumbnail Section -->"
+    + "<div style='position:relative; background-color:#000;'>"
+    + "<img src='" + thumb + "' width='100%' style='max-width:100%; display:block; height:auto; border-bottom:3px solid #FF0000;'>"
+    + "<div style='position:absolute; bottom:8px; right:8px; background:rgba(0,0,0,0.8); color:white; padding:2px 6px; border-radius:4px; font-size:12px;'>360p MP4</div>"
+    + "</div>"
+    + "<!-- Details Section -->"
+    + "<div style='padding:16px;'>"
+    + "<div style='font-weight:700; font-size:18px; color:#111; margin-bottom:8px; line-height:1.3;'>" + title + "</div>"
+    + "<div style='color:#606060; font-size:14px; margin:4px 0;'>"
+    + "<strong style='color:#000;'>" + channel + "</strong> \u2022 Duration: " + duration + " \u2022 " + views + " views \u2022 " + uploadDate
+    + "</div>"
+    + "<!-- Status -->"
+    + "<div style='margin-top:12px; padding-top:12px; border-top:1px solid #eee;'>"
+    + "<div style='display:flex; justify-content:space-between; align-items:center;'>"
+    + "<strong style='color:#0f9d58; font-size:15px;'>\u2713 Download Success</strong>"
+    + "<span style='color:#555; font-size:13px;'>" + sizeMB + " MB</span>"
+    + "</div>"
+    + "<p style='margin:4px 0 0; color:#333; font-size:14px;'>File: <strong>" + cleanFileName + "</strong></p>"
+    + "</div>"
+    + "</div>"
+    + "</div>";
 }
 
 /**
  * Builds the complete HTML reply for successful downloads.
  */
 function buildDownloadReplyHtml(videoCards) {
-  return `
-    <div style="font-family:'Roboto',Arial,sans-serif; max-width:750px; margin:0 auto; background:#f5f5f5; color:#000; padding:20px; border-radius:16px;">
-      <!-- Header -->
-      <div style="background:#FF0000; padding:15px 20px; text-align:left; border-radius:12px 12px 0 0;">
-        <h1 style="margin:0; color:white; font-size:24px; font-weight:700; letter-spacing:1px;">
-          YouTube Bot <span style="font-weight:400; font-size:16px; margin-left:10px;">| Downloads Ready</span>
-        </h1>
-      </div>
-      
-      <!-- Body -->
-      <div style="padding:20px 20px 30px; background:white; border-radius:0 0 12px 12px; box-shadow:0 8px 15px rgba(0,0,0,0.05);">
-        <h2 style="color:#111; font-size:22px; margin-bottom:15px; border-bottom:2px solid #eee; padding-bottom:10px;">Your Video Attachments</h2>
-        <p style="font-size:16px; color:#333; margin-bottom:20px;">
-          The videos you requested are attached to this email. Click the download icon in Gmail to save them to your device.
-        </p>
-        
-        <div>${videoCards.join('')}</div>
-
-        <hr style="border:0; border-top:1px dashed #ddd; margin:30px 0;">
-        <p style="color:#777; font-size:12px; text-align:center;">
-          Generated by the YouTube Bot Service. Attachment size limited to 24MB per email.
-        </p>
-      </div>
-    </div>
-  `;
+  // Replaced template literal with string concatenation
+  return ""
+    + "<div style='font-family:\"Roboto\",Arial,sans-serif; max-width:750px; margin:0 auto; background:#f5f5f5; color:#000; padding:20px; border-radius:16px;'>"
+    + "<!-- Header -->"
+    + "<div style='background:#FF0000; padding:15px 20px; text-align:left; border-radius:12px 12px 0 0;'>"
+    + "<h1 style='margin:0; color:white; font-size:24px; font-weight:700; letter-spacing:1px;'>"
+    + "YouTube Bot <span style='font-weight:400; font-size:16px; margin-left:10px;'>| Downloads Ready</span>"
+    + "</h1>"
+    + "</div>"
+    + "<!-- Body -->"
+    + "<div style='padding:20px 20px 30px; background:white; border-radius:0 0 12px 12px; box-shadow:0 8px 15px rgba(0,0,0,0.05);'>"
+    + "<h2 style='color:#111; font-size:22px; margin-bottom:15px; border-bottom:2px solid #eee; padding-bottom:10px;'>Your Video Attachments</h2>"
+    + "<p style='font-size:16px; color:#333; margin-bottom:20px;'>"
+    + "The videos you requested are attached to this email. Click the download icon in Gmail to save them to your device."
+    + "</p>"
+    + "<div>" + videoCards.join('') + "</div>"
+    + "<hr style='border:0; border-top:1px dashed #ddd; margin:30px 0;'>"
+    + "<p style='color:#777; font-size:12px; text-align:center;'>"
+    + "Generated by the YouTube Bot Service. Attachment size limited to 24MB per email."
+    + "</p>"
+    + "</div>"
+    + "</div>";
 }
 
 /**
@@ -977,7 +977,7 @@ function buildSearchResultsHtml(items, replyToEmail, query) {
     const title = truncateTitle(rawTitle); // Truncate and clean the title
     const thumb = item.snippet.thumbnails.high.url;
     const channel = item.snippet.channelTitle.replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    const link = `https://youtu.be/${videoId}`;
+    const link = "https://youtu.be/" + videoId;
     
     // Extract and format views, date, and duration
     const viewCount = item.statistics?.viewCount ? Number(item.statistics.viewCount).toLocaleString() : 'N/A';
@@ -995,69 +995,66 @@ function buildSearchResultsHtml(items, replyToEmail, query) {
       ? rawDescription.substring(0, 100) + '...'
       : rawDescription;
 
-    // Mailto link is encoded to ensure the video link is pasted correctly in the new draft's body.
-    cards += `
-      <!-- Single Search Result Card (using Table for stability) -->
-      <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="margin-bottom:15px; padding:15px; background:#fafafa; border-radius:10px; border:1px solid #eee;">
-        <tr>
-          <!-- Thumbnail Cell (Increased width/height to 160x90 for better desktop presentation) -->
-          <td valign="top" style="padding:0; width:160px; height:90px; padding-right:15px;">
-            <a href="${link}" style="text-decoration:none;">
-              <div style="width:160px; height:90px; overflow:hidden; border-radius:6px; position:relative;">
-                <img src="${thumb}" width="160" height="90" style="display:block; width:100%; height:100%; object-fit:cover;">
-                <!-- Display Duration on Thumbnail -->
-                <div style="position:absolute; bottom:4px; right:4px; background:rgba(0,0,0,0.8); color:white; padding:2px 6px; border-radius:3px; font-size:11px; line-height:1.2;">${duration}</div>
-              </div>
-            </a>
-          </td>
-
-          <!-- Details & Actions Cell -->
-          <td valign="top" style="padding:0;">
-            <strong style="font-size:16px; color:#111; display:block; margin-bottom:4px; line-height:1.3;">${title}</strong>
-            
-            <small style="color:#606060; display:block; margin-bottom:4px;">
-              ${channel}
-            </small>
-            <!-- Views, Duration and Date Info (Enhanced visibility) -->
-            <small style="color:#888; display:block; margin-bottom:8px; font-size:12px;">
-              Duration: <strong>${duration}</strong> \u2022 Views: <strong>${viewCount}</strong> \u2022 Published: <strong>${publishedDate}</strong>
-            </small>
-
-            <!-- Description Snippet -->
-            <p style="color:#555; font-size:13px; margin:0 0 12px 0; line-height:1.4;">
-              ${descriptionSnippet}
-            </p>
-
-            <table role="presentation" border="0" cellpadding="0" cellspacing="0">
-              <tr>
-                <td style="padding:0; padding-right:12px;">
-                  <a href="mailto:${replyToEmail}?subject=yt&body=${encodeURIComponent(link)}"
-                     style="background:#ff0000; color:white; padding:9px 18px; border-radius:50px; text-decoration:none; font-weight:bold; font-size:14px; display:inline-block; box-shadow:0 2px 4px rgba(0,0,0,0.2);">
-                    <span style="font-size:16px; margin-right:5px; vertical-align:middle;">\u2193</span> Download
-                  </a>
-                </td>
-                <td style="padding:0;">
-                  <a href="${link}" style="color:#0d6efd; text-decoration:none; font-size:14px; font-weight:500;">
-                    View on YouTube
-                  </a>
-                </td>
-              </tr>
-            </table>
-          </td>
-        </tr>
-      </table>`;
+    // Replaced template literal with string concatenation
+    cards += ""
+      + "<!-- Single Search Result Card (using Table for stability) -->"
+      + "<table role='presentation' border='0' cellpadding='0' cellspacing='0' width='100%' style='margin-bottom:15px; padding:15px; background:#fafafa; border-radius:10px; border:1px solid #eee;'>"
+      + "<tr>"
+      + "<!-- Thumbnail Cell (Increased width/height to 160x90 for better desktop presentation) -->"
+      + "<td valign='top' style='padding:0; width:160px; height:90px; padding-right:15px;'>"
+      + "<a href='" + link + "' style='text-decoration:none;'>"
+      + "<div style='width:160px; height:90px; overflow:hidden; border-radius:6px; position:relative;'>"
+      + "<img src='" + thumb + "' width='160' height='90' style='display:block; width:100%; height:100%; object-fit:cover;'>"
+      + "<!-- Display Duration on Thumbnail -->"
+      + "<div style='position:absolute; bottom:4px; right:4px; background:rgba(0,0,0,0.8); color:white; padding:2px 6px; border-radius:3px; font-size:11px; line-height:1.2;'>" + duration + "</div>"
+      + "</div>"
+      + "</a>"
+      + "</td>"
+      + "<!-- Details & Actions Cell -->"
+      + "<td valign='top' style='padding:0;'>"
+      + "<strong style='font-size:16px; color:#111; display:block; margin-bottom:4px; line-height:1.3;'>" + title + "</strong>"
+      + "<small style='color:#606060; display:block; margin-bottom:4px;'>"
+      + channel
+      + "</small>"
+      + "<!-- Views, Duration and Date Info (Enhanced visibility) -->"
+      + "<small style='color:#888; display:block; margin-bottom:8px; font-size:12px;'>"
+      + "Duration: <strong>" + duration + "</strong> \u2022 Views: <strong>" + viewCount + "</strong> \u2022 Published: <strong>" + publishedDate + "</strong>"
+      + "</small>"
+      + "<!-- Description Snippet -->"
+      + "<p style='color:#555; font-size:13px; margin:0 0 12px 0; line-height:1.4;'>"
+      + descriptionSnippet
+      + "</p>"
+      + "<table role='presentation' border='0' cellpadding='0' cellspacing='0'>"
+      + "<tr>"
+      + "<td style='padding:0; padding-right:12px;'>"
+      + "<a href='mailto:" + replyToEmail + "?subject=yt&body=" + encodeURIComponent(link) + "'"
+      + "style='background:#ff0000; color:white; padding:9px 18px; border-radius:50px; text-decoration:none; font-weight:bold; font-size:14px; display:inline-block; box-shadow:0 2px 4px rgba(0,0,0,0.2);'>"
+      + "<span style='font-size:16px; margin-right:5px; vertical-align:middle;'>\u2193</span> Download"
+      + "</a>"
+      + "</td>"
+      + "<td style='padding:0;'>"
+      + "<a href='" + link + "' style='color:#0d6efd; text-decoration:none; font-size:14px; font-weight:500;'>"
+      + "View on YouTube"
+      + "</a>"
+      + "</td>"
+      + "</tr>"
+      + "</table>"
+      + "</td>"
+      + "</tr>"
+      + "</table>";
   });
 
-  return `<div style="font-family:'Roboto',Arial,sans-serif; max-width:750px; margin:20px auto; padding:0; background:white; border-radius:16px; box-shadow:0 4px 20px rgba(0,0,0,0.1);">
-            <div style="background:#FF0000; padding:15px 20px; margin:-20px -20px 20px -20px; border-radius:16px 16px 0 0;">
-              <h2 style="color:white; text-align:center; font-weight:700; margin:0;">Search Results</h2>
-            </div>
-            <div style="padding: 0 20px 20px 20px;">
-              <h3 style="color:#333; font-weight:500; margin-bottom:15px;">Top results for: <span style="font-weight:700;">"${query}"</span></h3>
-              <p style="font-size:14px; color:#555; margin-bottom:20px;">Click the <strong style="color:#ff0000;">Download</strong> button to request the video attachment in a reply.</p>
-              <div style="padding:10px 0;">${cards}</div>
-            </div>
-          </div>`;
+  // Replaced template literal with string concatenation
+  return "<div style='font-family:\"Roboto\",Arial,sans-serif; max-width:750px; margin:20px auto; padding:0; background:white; border-radius:16px; box-shadow:0 4px 20px rgba(0,0,0,0.1);'>"
+    + "<div style='background:#FF0000; padding:15px 20px; margin:-20px -20px 20px -20px; border-radius:16px 16px 0 0;'>"
+    + "<h2 style='color:white; text-align:center; font-weight:700; margin:0;'>Search Results</h2>"
+    + "</div>"
+    + "<div style='padding: 0 20px 20px 20px;'>"
+    + "<h3 style='color:#333; font-weight:500; margin-bottom:15px;'>Top results for: <span style='font-weight:700;'>\"" + query + "\"</span></h3>"
+    + "<p style='font-size:14px; color:#555; margin-bottom:20px;'>Click the <strong style='color:#ff0000;'>Download</strong> button to request the video attachment in a reply.</p>"
+    + "<div style='padding:10px 0;'>" + cards + "</div>"
+    + "</div>"
+    + "</div>";
 }
 
 /**
@@ -1071,39 +1068,39 @@ function sendHelpCard(message, userRole, roleLimits) {
   const displaySearches = roleLimits.searches === Infinity ? 'Unlimited' : roleLimits.searches;
 
 
-  const html = `
-    <div style="font-family:'Roboto',Arial,sans-serif; max-width:640px; margin:30px auto; padding:30px; background:linear-gradient(145deg, #FF0000 0%, #B20000 100%); color:white; border-radius:20px; text-align:center; box-shadow:0 15px 40px rgba(0,0,0,0.4);">
-      <h1 style="margin:0; font-size:36px; font-weight:700; letter-spacing:1px;">YouTube Bot</h1>
-      <p style="font-size:20px; margin:25px 0;">Your Smart Video Assistant</p>
-      
-      <div style="background:rgba(255,255,255,0.9); padding:25px; border-radius:15px; margin:30px 0; font-size:17px; line-height:1.8; color:#333; text-align:left;">
-        <strong style="color:#FF0000; font-size:18px; display:block; margin-bottom:15px; text-align:center;">How to use me (Just reply to this email):</strong>
-        <ul style="list-style:none; padding:0; margin:0;">
-          <li style="margin-bottom:10px; padding-left:25px; position:relative;">
-            <span style="position:absolute; left:0; color:#FF0000; font-size:20px;">\u2022</span> 
-            Paste <strong>YouTube links</strong> \u2192 I attach the videos (up to 24MB).
-            <small style="color:#666; display:block; margin-top:3px;">Your Download Limit: <strong>${displayDownloads}</strong> per day.</small>
-          </li>
-          <li style="margin-bottom:10px; padding-left:25px; position:relative;">
-            <span style="position:absolute; left:0; color:#FF0000; font-size:20px;">\u2022</span> 
-            Type a <strong>search query</strong> (e.g., "new cat videos") \u2192 I send the top <strong>${roleLimits.maxResults}</strong> results.
-            <small style="color:#666; display:block; margin-top:3px;">Your Search Limit: <strong>${displaySearches}</strong> per day.</small>
-          </li>
-          <li style="margin-bottom:10px; padding-left:25px; position:relative;">
-            <span style="position:absolute; left:0; color:#FF0000; font-size:20px;">\u2022</span> 
-            Type <code style="background:#ddd; color:#333; padding:3px 8px; border-radius:4px; font-weight:bold;">info</code> or <code style="background:#ddd; color:#333; padding:3px 8px; border-radius:4px; font-weight:bold;">help</code> \u2192 see this guide.
-          </li>
-          <li style="margin-bottom:10px; padding-left:25px; position:relative;">
-            <span style="position:absolute; left:0; color:#FF0000; font-size:20px;">\u2022</span> 
-            Type <code style="background:#ddd; color:#333; padding:3px 8px; border-radius:4px; font-weight:bold;">test_api_key</code> \u2192 to check if your YouTube API key is working.
-          </li>
-        </ul>
-        <strong style="display:block; margin-top:20px; padding-top:10px; border-top:1px solid #ccc; text-align:center;">
-          <span style="color:#FF0000;">Your Current Role: ${roleLimits.label} (${userRole})</span> | All video attachments are in 360p MP4 format.
-        </strong>
-      </div>
-      <p style="font-size:14px; opacity:0.8; margin-top:20px;">Service Status: Online and Ready</p>
-    </div>`;
+  // Replaced template literal with string concatenation
+  const html = ""
+    + "<div style='font-family:\"Roboto\",Arial,sans-serif; max-width:640px; margin:30px auto; padding:30px; background:linear-gradient(145deg, #FF0000 0%, #B20000 100%); color:white; border-radius:20px; text-align:center; box-shadow:0 15px 40px rgba(0,0,0,0.4);'>"
+    + "<h1 style='margin:0; font-size:36px; font-weight:700; letter-spacing:1px;'>YouTube Bot</h1>"
+    + "<p style='font-size:20px; margin:25px 0;'>Your Smart Video Assistant</p>"
+    + "<div style='background:rgba(255,255,255,0.9); padding:25px; border-radius:15px; margin:30px 0; font-size:17px; line-height:1.8; color:#333; text-align:left;'>"
+    + "<strong style='color:#FF0000; font-size:18px; display:block; margin-bottom:15px; text-align:center;'>How to use me (Just reply to this email):</strong>"
+    + "<ul style='list-style:none; padding:0; margin:0;'>"
+    + "<li style='margin-bottom:10px; padding-left:25px; position:relative;'>"
+    + "<span style='position:absolute; left:0; color:#FF0000; font-size:20px;'>\u2022</span> "
+    + "Paste <strong>YouTube links</strong> \u2192 I attach the videos (up to 24MB)."
+    + "<small style='color:#666; display:block; margin-top:3px;'>Your Download Limit: <strong>" + displayDownloads + "</strong> per day.</small>"
+    + "</li>"
+    + "<li style='margin-bottom:10px; padding-left:25px; position:relative;'>"
+    + "<span style='position:absolute; left:0; color:#FF0000; font-size:20px;'>\u2022</span> "
+    + "Type a <strong>search query</strong> (e.g., \"new cat videos\") \u2192 I send the top <strong>" + roleLimits.maxResults + "</strong> results."
+    + "<small style='color:#666; display:block; margin-top:3px;'>Your Search Limit: <strong>" + displaySearches + "</strong> per day.</small>"
+    + "</li>"
+    + "<li style='margin-bottom:10px; padding-left:25px; position:relative;'>"
+    + "<span style='position:absolute; left:0; color:#FF0000; font-size:20px;'>\u2022</span> "
+    + "Type <code style='background:#ddd; color:#333; padding:3px 8px; border-radius:4px; font-weight:bold;'>info</code> or <code style='background:#ddd; color:#333; padding:3px 8px; border-radius:4px; font-weight:bold;'>help</code> \u2192 see this guide."
+    + "</li>"
+    + "<li style='margin-bottom:10px; padding-left:25px; position:relative;'>"
+    + "<span style='position:absolute; left:0; color:#FF0000; font-size:20px;'>\u2022</span> "
+    + "Type <code style='background:#ddd; color:#333; padding:3px 8px; border-radius:4px; font-weight:bold;'>test_api_key</code> \u2192 to check if your YouTube API key is working."
+    + "</li>"
+    + "</ul>"
+    + "<strong style='display:block; margin-top:20px; padding-top:10px; border-top:1px solid #ccc; text-align:center;'>"
+    + "<span style='color:#FF0000;'>Your Current Role: " + roleLimits.label + " (" + userRole + ")</span> | All video attachments are in 360p MP4 format."
+    + "</strong>"
+    + "</div>"
+    + "<p style='font-size:14px; opacity:0.8; margin-top:20px;'>Service Status: Online and Ready</p>"
+    + "</div>";
 
   message.reply("How to use your YouTube Bot", { htmlBody: C.STYLE + html });
 }
