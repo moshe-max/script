@@ -11,6 +11,7 @@
  * FIX: Replaced all ES6 Template Literals (using backticks) with standard string concatenation
  * to ensure compatibility with the Google Apps Script V8 runtime.
  * FIX: Replaced 'for...of' loop with standard index-based 'for' loop for maximum compatibility.
+ * FIX: Verified syntax of the main 'for' loop for missing semicolon.
  */
 
 // ====================================================================
@@ -62,7 +63,7 @@ function processYouTubeEmails() {
   const threads = GmailApp.search('is:unread subject:yt');
   log("Found " + threads.length + " unread thread(s) with \"yt\" in subject");
 
-  // Fix line 64: Changed for...of loop to standard index-based for loop
+  // Standard index-based for loop for Apps Script compatibility (This will be line ~66 in the full file)
   for (let i = 0; i < threads.length; i++) {
     const thread = threads[i]; // Use let/const for the thread variable inside the loop
 
@@ -85,8 +86,7 @@ function processYouTubeEmails() {
     const youtubeRegex = /(https?:\/\/(?:www\.?)?(?:youtube\.com\/watch\?v=|youtu\.be\/)[A-Za-z0-9_-]{11})/g;
     // Fix: Replaced spread operator with Array.prototype.slice.call for array conversion compatibility
     const matches = body.match(youtubeRegex) || [];
-    const links = [...new Set(matches)];
-
+    const links = Array.prototype.slice.call(new Set(matches)); // Use standard function call
 
     if (links.length > 0) {
       handleDirectLinks(message, thread, links, sender);
@@ -150,7 +150,7 @@ function handleDirectLinks(message, thread, links, sender) {
   let attachedCount = 0;
   const videoCards = [];
 
-  // Fix: Replacing for...of loop with index-based for loop
+  // Replacing for...of loop with index-based for loop
   for (let j = 0; j < links.length; j++) {
     const url = links[j];
 
@@ -857,7 +857,7 @@ function extractNewQuery(originalBody) {
   const lines = query.split('\n');
   let newLines = [];
 
-  // Fix: Replacing for...of loop with index-based for loop
+  // Replacing for...of loop with index-based for loop
   for (let l = 0; l < lines.length; l++) {
     let line = lines[l];
     line = line.trim();
@@ -899,7 +899,7 @@ function truncateTitle(title, limit = 60) {
 function formatDuration(isoDuration) {
   if (!isoDuration) return 'N/A';
   
-  // Fix: Replaced string destructuring/advanced regex match with simple indexing
+  // Replaced string destructuring/advanced regex match with simple indexing
   const matches = isoDuration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
   if (!matches) return 'N/A';
   
@@ -991,7 +991,7 @@ function buildDownloadReplyHtml(videoCards) {
 function buildSearchResultsHtml(items, replyToEmail, query) {
   let cards = "";
 
-  // Fix: Replacing forEach with index-based for loop
+  // Replacing forEach with index-based for loop
   for (let m = 0; m < items.length; m++) {
     const item = items[m];
     
