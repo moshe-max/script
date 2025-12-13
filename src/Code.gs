@@ -2,9 +2,7 @@
  * Gemini AI Chatbot – Gmail Add-on (Standalone)
  * ---------------------------------------------
  * Pure AI chat interface deployed as a Gmail Add-on.
- * ❌ No email reading
- * ❌ No Gmail context
- * ✅ Just a chat UI powered by Gemini
+ * Persistent single-user chat.
  *
  * REQUIREMENTS:
  * 1. Set Script Property: GEMINI_API_KEY
@@ -33,16 +31,6 @@ function buildChatUI_() {
     .setTitle('Message')
     .setHint('Chat is remembered (local to you)')
     .setMultiline(true);
-() {
-  const header = CardService.newCardHeader()
-    .setTitle('Gemini AI Chatbot')
-    .setSubtitle('Standalone Gmail Add-on');
-
-  const input = CardService.newTextInput()
-    .setFieldName('prompt')
-    .setTitle('Message')
-    .setHint('Ask anything…')
-    .setMultiline(true);
 
   const action = CardService.newAction()
     .setFunctionName('sendToGemini_');
@@ -63,7 +51,7 @@ function buildChatUI_() {
 }
 
 /**
- * Handle chat submit
+ * Handle chat submit with persistent history
  */
 function sendToGemini_(e) {
   const prompt = e.formInput.prompt;
@@ -71,7 +59,7 @@ function sendToGemini_(e) {
     return errorCard_('Please enter a message.');
   }
 
-  // === Load chat history (single-user) ===
+  // Load single-user chat history
   const props = PropertiesService.getUserProperties();
   const history = JSON.parse(props.getProperty('CHAT_HISTORY') || '[]');
 
@@ -81,20 +69,15 @@ function sendToGemini_(e) {
 
   history.push({ role: 'model', text: reply });
 
-  // Limit history to last 10 messages (5 turns)
+  // Keep last 10 messages (5 turns)
   const trimmed = history.slice(-10);
   props.setProperty('CHAT_HISTORY', JSON.stringify(trimmed));
 
   return responseCard_(prompt, reply);
 }
 
-  const reply = callGemini_(prompt);
-
-  return responseCard_(prompt, reply);
-}
-
 /**
- * Gemini API call
+ * Gemini API call with chat history
  */
 function callGeminiWithHistory_(history) {
   const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
@@ -109,33 +92,6 @@ function callGeminiWithHistory_(history) {
 
   const payload = {
     contents,
-    generationConfig: {
-      temperature: 0.6,
-      maxOutputTokens: 1024
-    }
-  };
-
-  const res = UrlFetchApp.fetch(url, {
-    method: 'post',
-    contentType: 'application/json',
-    payload: JSON.stringify(payload),
-    muteHttpExceptions: true
-  });
-
-  const json = JSON.parse(res.getContentText());
-
-  try {
-    return json.candidates[0].content.parts[0].text;
-  } catch (e) {
-    return 'No response from Gemini.';
-  }
-}:generateContent?key=${apiKey}`;
-
-  const payload = {
-    contents: [{
-      role: 'user',
-      parts: [{ text }]
-    }],
     generationConfig: {
       temperature: 0.6,
       maxOutputTokens: 1024
@@ -202,7 +158,7 @@ function errorCard_(msg) {
 }
 
 /**
- * Basic HTML escape
+ * Simple HTML escape for text
  */
 function escape_(t) {
   return t.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
