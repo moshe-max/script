@@ -63,7 +63,7 @@ function processYouTubeEmails() {
   Logger.log("=== Bot started ===");
 
   const threads = GmailApp.search('is:unread subject:yt');
-  Logger.log(`Found ${threads.length} unread thread(s) with "yt" in subject`);
+  Logger.log("Found " + threads.length + " unread thread(s) with \"yt\" in subject");
 
   for (const thread of threads) {
     const messages = thread.getMessages();
