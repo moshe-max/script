@@ -49,7 +49,7 @@ function getConstants() {
     USAGE_SHEET_NAME: "Usage & Limits",
     ROLES_SHEET_NAME: "User Roles", // New sheet for defining user roles
     
-    STYLE: "<style>@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');</style>",
+    STYLE: `<style>@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');</style>`,
     YOUTUBE_API_KEY: YOUTUBE_API_KEY // Export API key for direct use
   };
 }
@@ -59,55 +59,37 @@ function getConstants() {
 // ====================================================================
 
 function processYouTubeEmails() {
-  // נשתמש ב-Logger.log עבור Google Apps Script
-  Logger.log("=== Bot started ===");
+  log("=== Bot started ===");
 
   const threads = GmailApp.search('is:unread subject:yt');
-  Logger.log("Found " + threads.length + " unread thread(s) with \"yt\" in subject");
+  log(`Found ${threads.length} unread thread(s) with "yt" in subject`);
 
   for (const thread of threads) {
     const messages = thread.getMessages();
-    // תמיד נתמקד בהודעה האחרונה בשרשור
     const message = messages[messages.length - 1]; 
 
     if (!message.isUnread()) continue;
 
     const sender = message.getFrom();
     const subject = message.getSubject();
-    
-    // חילוץ גוף ההודעה ב-Plain Text וב-HTML כדי להגביר את הסיכויים למצוא קישורים
-    const bodyPlain = message.getPlainBody().trim();
-    const bodyHtml = message.getBody(); 
-    const combinedBody = bodyPlain + "\n\n" + bodyHtml;
+    const body = message.getPlainBody().trim();
 
-    Logger.log(`Processing → From: ${sender} | Subject: ${subject}`);
-    
-    // *** הביטוי הרגולרי המשופר לחילוץ קישורי YouTube ***
-    // מחפש קישורי http/https, עם youtube.com/watch?v= או youtu.be/
-    // ומאפשר תווים נוספים בסוף הקישור (כגון פרמטרי &t=30s), עד שנתקל ברווח או תג HTML.
-    const youtubeRegex = /(https?:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)[A-Za-z0-9_-]{11}[^\s<>"'\]]*)/g;
-    
-    // חילוץ הקישורים מהתוכן המשולב וסינון כפילויות
-    const links = [...new Set((combinedBody.match(youtubeRegex) || []))];
+    log(`Processing → From: ${sender} | Subject: ${subject}`);
 
-    Logger.log(`[DEBUG] Extracted Links Count: ${links.length}`);
+    // Extract YouTube links
+    const youtubeRegex = /(https?:\/\/(?:www\.?)?(?:youtube\.com\/watch\?v=|youtu\.be\/)[A-Za-z09_-]{11})/g;
+    const links = [...new Set((body.match(youtubeRegex) || []))];
+
     if (links.length > 0) {
-      Logger.log(`[DEBUG] Links found: ${links.join(' | ')}`);
-      // קריאה לפונקציה המטפלת בקישורים ישירים
-      // (שים לב: הפונקציה handleDirectLinks צריכה להיות מוגדרת במקום אחר בסקריפט שלך)
       handleDirectLinks(message, thread, links, sender);
     } else {
-      // אם לא נמצאו קישורים, מניחים שכל גוף ההודעה (הטקסט הרגיל) הוא שאילתת חיפוש
-      Logger.log(`[DEBUG] No links found. Using Plain Body as Search Query: "${bodyPlain}"`);
-      // קריאה לפונקציה המטפלת בשאילתות חיפוש
-      // (שים לב: הפונקציה handleSearchQuery צריכה להיות מוגדרת במקום אחר בסקריפט שלך)
-      handleSearchQuery(message, thread, bodyPlain, sender);
+      handleSearchQuery(message, thread, body, sender);
     }
 
     thread.markRead();
   }
 
-  Logger.log("=== Bot finished ===\n");
+  log("=== Bot finished ===\n");
 }
 
 // ====================================================================
