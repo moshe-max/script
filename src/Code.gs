@@ -49,7 +49,7 @@ function getConstants() {
     USAGE_SHEET_NAME: "Usage & Limits",
     ROLES_SHEET_NAME: "User Roles", // New sheet for defining user roles
     
-    STYLE: `<style>@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');</style>`,
+    STYLE: '<style>@import url("https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap");</style>',
     YOUTUBE_API_KEY: YOUTUBE_API_KEY // Export API key for direct use
   };
 }
