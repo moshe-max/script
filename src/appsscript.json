@@ -1,12 +1,18 @@
 {
-  "timeZone": "America/New_York",
-  "dependencies": {},
+  "timeZone": "Asia/Jerusalem",
   "exceptionLogging": "STACKDRIVER",
+
   "oauthScopes": [
-    "https://www.googleapis.com/auth/script.external_request",
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/gmail.readonly",
-    "https://www.googleapis.com/auth/gmail.modify",
-    "https://www.googleapis.com/auth/drive"
-  ]
+    "https://www.googleapis.com/auth/gmail.addons.execute",
+    "https://www.googleapis.com/auth/script.external_request"
+  ],
+
+  "gmail": {
+    "contextualTriggers": [
+      {
+        "unconditional": {},
+        "onTriggerFunction": "onGmailMessageOpen"
+      }
+    ]
+  }
 }
