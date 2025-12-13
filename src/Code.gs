@@ -9,7 +9,8 @@
  * Implements role-based usage limits read from the "User Roles" sheet.
  *
  * FIX: Replaced all ES6 Template Literals (using backticks) with standard string concatenation
- * to ensure compatibility with the Google Apps Script V8 runtime environment.
+ * to ensure compatibility with the Google Apps Script V8 runtime.
+ * FIX: Replaced 'for...of' loop with standard index-based 'for' loop for maximum compatibility.
  */
 
 // ====================================================================
@@ -61,7 +62,10 @@ function processYouTubeEmails() {
   const threads = GmailApp.search('is:unread subject:yt');
   log("Found " + threads.length + " unread thread(s) with \"yt\" in subject");
 
-  for (const thread of threads) {
+  // Fix line 64: Changed for...of loop to standard index-based for loop
+  for (let i = 0; i < threads.length; i++) {
+    const thread = threads[i]; // Use let/const for the thread variable inside the loop
+
     const messages = thread.getMessages();
     const message = messages[messages.length - 1]; 
 
@@ -79,7 +83,10 @@ function processYouTubeEmails() {
 
     // Extract YouTube links
     const youtubeRegex = /(https?:\/\/(?:www\.?)?(?:youtube\.com\/watch\?v=|youtu\.be\/)[A-Za-z0-9_-]{11})/g;
-    const links = [...new Set((body.match(youtubeRegex) || []))];
+    // Fix: Replaced spread operator with Array.prototype.slice.call for array conversion compatibility
+    const matches = body.match(youtubeRegex) || [];
+    const links = [...new Set(matches)];
+
 
     if (links.length > 0) {
       handleDirectLinks(message, thread, links, sender);
@@ -143,7 +150,10 @@ function handleDirectLinks(message, thread, links, sender) {
   let attachedCount = 0;
   const videoCards = [];
 
-  for (const url of links) {
+  // Fix: Replacing for...of loop with index-based for loop
+  for (let j = 0; j < links.length; j++) {
+    const url = links[j];
+
     const videoId = url.includes("v=") ? url.split("v=")[1].substring(0, 11) : url.split("/").pop().substring(0, 11);
     log("Attempting to download " + videoId + "...");
 
@@ -320,7 +330,11 @@ function handleSearchQuery(message, thread, originalBody, sender) {
     let items = searchData.items || [];
     
     // --- Batch fetch statistics (views) AND contentDetails (duration) ---
-    const videoIds = items.map(item => item.id.videoId).join(',');
+    // Fix: Using standard map function for array transformation
+    let videoIdsArray = items.map(function(item) {
+        return item.id.videoId;
+    });
+    const videoIds = videoIdsArray.join(',');
     
     if (videoIds.length > 0) {
       // Fetch statistics and contentDetails for all results in a single, efficient API call
@@ -329,15 +343,19 @@ function handleSearchQuery(message, thread, originalBody, sender) {
       const infoData = JSON.parse(infoResponse.getContentText());
       
       const statsMap = {};
-      infoData.items.forEach(infoItem => {
+      // Fix: Using standard for loop for iteration
+      const infoItems = infoData.items || [];
+      for(let k = 0; k < infoItems.length; k++) {
+        const infoItem = infoItems[k];
         statsMap[infoItem.id] = {
           statistics: infoItem.statistics,
           contentDetails: infoItem.contentDetails
         };
-      });
+      }
       
       // Merge statistics and duration into search items array
-      items = items.map(item => {
+      // Fix: Using standard map function for array transformation
+      items = items.map(function(item) {
         const videoId = item.id.videoId;
         const videoInfo = statsMap[videoId] || {};
         item.statistics = videoInfo.statistics || {}; 
@@ -768,7 +786,7 @@ function sendLimitExceededReply(message, usageCheck, userRole, roleLimits) {
 
   // Replaced template literal with string concatenation
   const html = ""
-    + "<div style='font-family:\"Roboto\",Arial,sans-serif; max-width:600px; margin:20px auto; padding:25px; background:#fef3f3; color:#a00; border:1px solid #f00; border-radius:12px; text-align:center; box-shadow: 0 4px 10px rgba(0,0,0,0.1);'>"
+    + "<div style='font-family:\"Roboto\",Arial,sans-serif; max-width:600px; margin:20px auto; padding:25px; background:#fef3f3; color:#a00; border:1px solid #f00; border-radius:12px; text-align:center; box-shadow:0 4px 10px rgba(0,0,0,0.1);'>"
     + "<h2 style='color:#d00; font-size:24px; margin-bottom:10px;'>\uD83D\uDED1 Usage Limit Reached</h2>"
     + "<p style='font-size:16px; color:#555; line-height:1.6;'>"
     + usageCheck.message
@@ -839,7 +857,9 @@ function extractNewQuery(originalBody) {
   const lines = query.split('\n');
   let newLines = [];
 
-  for (let line of lines) {
+  // Fix: Replacing for...of loop with index-based for loop
+  for (let l = 0; l < lines.length; l++) {
+    let line = lines[l];
     line = line.trim();
     // Stop at common quote markers
     if (line.startsWith('>') ||
@@ -879,9 +899,11 @@ function truncateTitle(title, limit = 60) {
 function formatDuration(isoDuration) {
   if (!isoDuration) return 'N/A';
   
+  // Fix: Replaced string destructuring/advanced regex match with simple indexing
   const matches = isoDuration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
   if (!matches) return 'N/A';
   
+  // matches[1] = hours, matches[2] = minutes, matches[3] = seconds
   const hours = parseInt(matches[1] || 0);
   const minutes = parseInt(matches[2] || 0);
   const seconds = parseInt(matches[3] || 0);
@@ -969,8 +991,11 @@ function buildDownloadReplyHtml(videoCards) {
 function buildSearchResultsHtml(items, replyToEmail, query) {
   let cards = "";
 
-  items.forEach(item => {
-    if (!item.id || !item.id.videoId) return; // Skip non-video items
+  // Fix: Replacing forEach with index-based for loop
+  for (let m = 0; m < items.length; m++) {
+    const item = items[m];
+    
+    if (!item.id || !item.id.videoId) continue; // Skip non-video items
 
     const videoId = item.id.videoId;
     const rawTitle = item.snippet.title.replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -980,14 +1005,14 @@ function buildSearchResultsHtml(items, replyToEmail, query) {
     const link = "https://youtu.be/" + videoId;
     
     // Extract and format views, date, and duration
-    const viewCount = item.statistics?.viewCount ? Number(item.statistics.viewCount).toLocaleString() : 'N/A';
+    const viewCount = item.statistics && item.statistics.viewCount ? Number(item.statistics.viewCount).toLocaleString() : 'N/A';
     
     let publishedDate = 'N/A';
     if (item.snippet.publishedAt) {
       publishedDate = Utilities.formatDate(new Date(item.snippet.publishedAt), "GMT", "MMM d, yyyy");
     }
     
-    const duration = item.contentDetails?.duration ? formatDuration(item.contentDetails.duration) : 'N/A';
+    const duration = item.contentDetails && item.contentDetails.duration ? formatDuration(item.contentDetails.duration) : 'N/A';
 
     // Get a truncated description snippet
     const rawDescription = item.snippet.description.replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -1042,7 +1067,7 @@ function buildSearchResultsHtml(items, replyToEmail, query) {
       + "</td>"
       + "</tr>"
       + "</table>";
-  });
+  }
 
   // Replaced template literal with string concatenation
   return "<div style='font-family:\"Roboto\",Arial,sans-serif; max-width:750px; margin:20px auto; padding:0; background:white; border-radius:16px; box-shadow:0 4px 20px rgba(0,0,0,0.1);'>"
