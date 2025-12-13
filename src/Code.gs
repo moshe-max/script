@@ -6,9 +6,7 @@
  * and replies with them as attachments.
  * 2. If no links are found, it performs a YouTube search and replies with interactive results.
  *
- * NEW FEATURES:
- * - Implements role-based usage limits (admin, pro user, user, guest).
- * - Reads user roles from the "User Roles" sheet.
+ * Implements role-based usage limits read from the "User Roles" sheet.
  */
 
 // ====================================================================
@@ -22,12 +20,8 @@ function getConstants() {
   // IMPORTANT: Retrieve the API key securely from Script Properties.
   const YOUTUBE_API_KEY = PropertiesService.getScriptProperties().getProperty('YOUTUBE_API_KEY');
 
-  // Throw a descriptive error if the key is missing.
-  if (!YOUTUBE_API_KEY) {
-    // Note: Do NOT throw here if we are only testing the key existence.
-    // The check for the existence of the API key for the test is now handled inside handleSearchQuery.
-  }
-
+  // The API Key existence check for search/download is now handled inside the main handlers.
+  
   return {
     RAILWAY_ENDPOINT: "https://yt-mail.onrender.com",
     YOUTUBE_API_BASE: "https://www.googleapis.com/youtube/v3",
@@ -35,19 +29,18 @@ function getConstants() {
     MAX_ATTACHMENT_SIZE_MB: 24, // Gmail attachment limit is 25MB
 
     // USAGE LIMITS (Role-based)
-    // NOTE: Searches, Downloads, and Max Results are now customized per role.
     ROLE_LIMITS: {
-      // ADMIN is now explicitly set to Infinity for unlimited usage tracking.
+      // ADMIN is explicitly set to Infinity for unlimited usage tracking.
       'admin': { downloads: Infinity, searches: Infinity, maxResults: 15, label: 'Admin' }, 
       'pro plus': { downloads: 15, searches: 15, maxResults: 15, label: 'Pro Plus User' }, // 15 per day/search
       'pro user': { downloads: 12, searches: 12, maxResults: 12, label: 'Pro User' }, // 12 per day/search
       'user': { downloads: 5, searches: 5, maxResults: 5, label: 'Standard User' }, // 5 per day/search
       'guest': { downloads: 1, searches: 5, maxResults: 5, label: 'Guest' } // Keeping guest as a low-limit tier
     },
-    DEFAULT_ROLE: 'guest', // <<< CHANGED: Set to 'guest' for non-listed users
+    DEFAULT_ROLE: 'guest', 
     USAGE_WINDOW_MINUTES: 1440, // 1440 minutes = 24 hours for "per day" limits
     USAGE_SHEET_NAME: "Usage & Limits",
-    ROLES_SHEET_NAME: "User Roles", // New sheet for defining user roles
+    ROLES_SHEET_NAME: "User Roles",
     
     STYLE: `<style>@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');</style>`,
     YOUTUBE_API_KEY: YOUTUBE_API_KEY // Export API key for direct use
@@ -74,13 +67,11 @@ function processYouTubeEmails() {
     const subject = message.getSubject();
     const body = message.getPlainBody().trim();
     
-    // --- FIX: Extract clean email address from the sender string ---
-    // Handles formats like "Name <email@example.com>" and plain "email@example.com"
+    // Extract clean email address from the sender string
     const emailMatch = senderFull.match(/<([^>]+)>/);
     const sender = emailMatch ? emailMatch[1].trim() : senderFull.trim(); 
-    // --- FIX END ---
 
-    log(`Processing → From: ${sender} | Subject: ${subject}`);
+    log(`Processing -> From: ${sender} | Subject: ${subject}`);
 
     // Extract YouTube links
     const youtubeRegex = /(https?:\/\/(?:www\.?)?(?:youtube\.com\/watch\?v=|youtu\.be\/)[A-Za-z0-9_-]{11})/g;
@@ -107,8 +98,7 @@ function processYouTubeEmails() {
  */
 function handleDirectLinks(message, thread, links, sender) {
   const C = getConstants();
-  // Check for API key *only* if the download logic requires metadata fetching later.
-  // The current script requires the API key for video metadata (title, channel, duration).
+  
   if (!C.YOUTUBE_API_KEY) {
     sendApiKeyMissingReply(message, "Download Request");
     return;
@@ -165,8 +155,7 @@ function handleDirectLinks(message, thread, links, sender) {
       const blob = response.getBlob();
       const sizeMB = Math.round(blob.getBytes().length / (1024 * 1024) * 10) / 10;
 
-      // 2. Get Video Metadata from YouTube API (Added contentDetails for duration)
-      // This step requires the API key
+      // 2. Get Video Metadata from YouTube API
       const infoUrl = `${C.YOUTUBE_API_BASE}/videos?part=snippet,statistics,contentDetails&id=${videoId}&key=${C.YOUTUBE_API_KEY}`;
       const infoRes = UrlFetchApp.fetch(infoUrl);
       const infoData = JSON.parse(infoRes.getContentText()).items[0];
@@ -237,7 +226,7 @@ function handleDirectLinks(message, thread, links, sender) {
 
   // 4. Send Reply
   const htmlBody = buildDownloadReplyHtml(videoCards);
-  message.reply("Your videos from YouTube", { htmlBody: C.STYLE + html, attachments: attachments });
+  message.reply("Your videos from YouTube", { htmlBody: C.STYLE + htmlBody, attachments: attachments });
 
   // Summary log
   logToSheet({
@@ -316,7 +305,7 @@ function handleSearchQuery(message, thread, originalBody, sender) {
   // -----------------------------------------------------------------
 
   // 3. Normal smart search
-  log(`Smart search → extracted query: "${query}"`);
+  log(`Smart search -> extracted query: "${query}"`);
 
   // Use the dynamic maxResults based on the user's role
   const searchUrl = `${C.YOUTUBE_API_BASE}/search?part=snippet&maxResults=${maxResults}&q=${encodeURIComponent(query)}&type=video&key=${C.YOUTUBE_API_KEY}`;
@@ -389,7 +378,7 @@ function handleSearchQuery(message, thread, originalBody, sender) {
       actionDetail: `Error: ${e.message}`,
       status: "Search Failed"
     });
-    message.reply("Search failed — an unexpected error occurred. Check the logs for details.");
+    message.reply("Search failed -- an unexpected error occurred. Check the logs for details.");
   }
 }
 
@@ -408,7 +397,7 @@ function testApiKeyStatus(message, sender, apiKey) {
         status = "Key Missing";
         details = "The 'YOUTUBE_API_KEY' property is not set in Script Properties. Please add your key.";
         color = "#ff6600"; // Orange
-        icon = "⚠️";
+        icon = "\u26A0\uFE0F"; // Warning emoji
     } else {
         // Attempt a simple, low-cost API call (e.g., search for a common term with maxResults=1)
         const testUrl = `${C.YOUTUBE_API_BASE}/search?part=id&maxResults=1&q=test&key=${apiKey}`;
@@ -421,29 +410,29 @@ function testApiKeyStatus(message, sender, apiKey) {
                 status = "Key Valid & Working";
                 details = "The API key successfully connected and performed a test search. Your bot should be fully operational!";
                 color = "#4CAF50"; // Green
-                icon = "✅";
+                icon = "\u2705"; // Check mark emoji
             } else if (responseCode === 400) {
                 // This is the error seen in the log
                 status = "Key Invalid/Unauthenticated (400)";
                 details = "The YouTube API rejected the key. Check if the key is correct and if the 'YouTube Data API v3' is enabled in your Google Cloud Console.";
                 color = "#F44336"; // Red
-                icon = "❌";
+                icon = "\u274C"; // Cross mark emoji
             } else if (responseCode === 403) {
                  status = "Forbidden (403)";
                  details = "The key might be valid but restricted (e.g., IP address restrictions, quota exceeded, or billing issue). Check your API Console restrictions and quota.";
                  color = "#F44336"; // Red
-                 icon = "🛑";
+                 icon = "\uD83D\uDED1"; // Stop sign emoji
             } else {
                 status = `API Test Failed (${responseCode})`;
                 details = `Received unexpected HTTP status code: ${responseCode}. Raw response: ${response.getContentText().substring(0, 100)}...`;
                 color = "#FF9800"; // Amber
-                icon = "❓";
+                icon = "\u2753"; // Question mark emoji
             }
         } catch (e) {
             status = "Connection Error";
             details = `Failed to connect to the Google API endpoint: ${e.toString()}`;
             color = "#757575"; // Grey
-            icon = "🔌";
+            icon = "\uD83D\uDD0C"; // Plug emoji
         }
     }
 
@@ -484,9 +473,9 @@ function sendApiKeyMissingReply(message, requestType, isInvalid = false) {
     
     const html = `
       <div style="font-family:'Roboto',Arial,sans-serif; max-width:600px; margin:20px auto; padding:25px; background:#fff0f0; color:#c00; border:2px solid #c00; border-radius:12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1);">
-        <h2 style="color:#c00; font-size:24px; margin-bottom:15px; text-align:center;">❌ ${status}</h2>
+        <h2 style="color:#c00; font-size:24px; margin-bottom:15px; text-align:center;">\u274C ${status}</h2>
         <p style="font-size:16px; color:#333; line-height:1.6; margin-bottom:20px;">
-          Your recent **${requestType}** failed.
+          Your recent <strong>${requestType}</strong> failed.
         </p>
         <div style="background:white; padding:15px; border-radius:8px; border:1px solid #fdd;">
             <strong style="color:#c00; display:block; margin-bottom:5px;">Required Action:</strong>
@@ -529,12 +518,16 @@ function getUserRolesSheet() {
     sheet.appendRow(["proplus@company.com", "pro plus", new Date(), "Pro Plus subscription"]);
     sheet.appendRow(["pro@company.com", "pro user", new Date(), "Premium subscription"]);
     
-    // EXPLICITLY set the Email column (A) to plain text format to prevent auto-hyperlinking/formatting errors
-    // Use getRange(startRow, startCol, numRows, numCols) - here we format everything from row 2 down.
+    // EXPLICITLY set the Email column (A) to plain text format to prevent formatting errors
     sheet.getRange(2, 1, sheet.getMaxRows(), 1).setNumberFormat("@"); 
     
     log(`Created new sheet: ${C.ROLES_SHEET_NAME}. Please populate it with user emails and roles.`);
   }
+  
+  // Re-apply formatting on existing sheets just in case of deployment issues
+  // Note: Only necessary if you suspect formatting issues persist, but helpful for robustness.
+  sheet.getRange(2, 1, sheet.getMaxRows(), 1).setNumberFormat("@"); 
+  
   return sheet;
 }
 
@@ -592,8 +585,10 @@ function getUsageSheet() {
     sheet.appendRow(header);
     sheet.setFrozenRows(1);
     sheet.getRange(1, 1, 1, header.length).setFontWeight("bold").setBackground("#4CAF50").setFontColor("white");
-    sheet.getRange(2, 1, sheet.getMaxRows(), 1).setNumberFormat("@"); // Ensure email column is treated as text
   }
+  // Ensure email column is treated as text for robustness
+  sheet.getRange(2, 1, sheet.getMaxRows(), 1).setNumberFormat("@"); 
+  
   return sheet;
 }
 
@@ -640,12 +635,10 @@ function checkAndIncrementUsage(sender, type, count, userRole, roleLimits) {
   
   // Check against the limits for the determined role
   const MAX_LIMIT = (type === 'download' ? roleLimits.downloads : roleLimits.searches);
-  const COUNT_INDEX = (type === 'download' ? 2 : 3); // Downloads is col 3 (index 2), Searches is col 4 (index 3)
-  const LAST_REQUEST_INDEX = (type === 'download' ? 4 : 5); // Last DL is col 5 (index 4), Last Search is col 6 (index 5)
   
   // Skip all usage checks for 'admin' role, as MAX_LIMIT is set to Infinity
   if (userRole === 'admin') {
-      // Ensure admin usage count doesn't increment infinitely in the sheet (just keep it at 0 or 1 for visual clarity)
+      // Ensure admin usage count doesn't increment infinitely in the sheet
       if (usageRecord) {
           row = usageRecord.row;
           sheet.getRange(row, 2).setValue(now); // Update last activity
@@ -771,7 +764,7 @@ function sendLimitExceededReply(message, usageCheck, userRole, roleLimits) {
 
   const html = `
     <div style="font-family:'Roboto',Arial,sans-serif; max-width:600px; margin:20px auto; padding:25px; background:#fef3f3; color:#a00; border:1px solid #f00; border-radius:12px; text-align:center; box-shadow: 0 4px 10px rgba(0,0,0,0.1);">
-      <h2 style="color:#d00; font-size:24px; margin-bottom:10px;">🛑 Usage Limit Reached</h2>
+      <h2 style="color:#d00; font-size:24px; margin-bottom:10px;">\uD83D\uDED1 Usage Limit Reached</h2>
       <p style="font-size:16px; color:#555; line-height:1.6;">
         ${usageCheck.message}
       </p>
@@ -923,13 +916,13 @@ function buildVideoCardHtml({ title, channel, views, uploadDate, thumb, cleanFil
       <div style="padding:16px;">
         <div style="font-weight:700; font-size:18px; color:#111; margin-bottom:8px; line-height:1.3;">${title}</div>
         <div style="color:#606060; font-size:14px; margin:4px 0;">
-          <strong style="color:#000;">${channel}</strong> • Duration: ${duration} • ${views} views • ${uploadDate}
+          <strong style="color:#000;">${channel}</strong> \u2022 Duration: ${duration} \u2022 ${views} views \u2022 ${uploadDate}
         </div>
         
         <!-- Status -->
         <div style="margin-top:12px; padding-top:12px; border-top:1px solid #eee;">
           <div style="display:flex; justify-content:space-between; align-items:center;">
-            <strong style="color:#0f9d58; font-size:15px;">✓ Download Success</strong>
+            <strong style="color:#0f9d58; font-size:15px;">\u2713 Download Success</strong>
             <span style="color:#555; font-size:13px;">${sizeMB} MB</span>
           </div>
           <p style="margin:4px 0 0; color:#333; font-size:14px;">File: <strong>${cleanFileName}</strong></p>
@@ -1027,7 +1020,7 @@ function buildSearchResultsHtml(items, replyToEmail, query) {
             </small>
             <!-- Views, Duration and Date Info (Enhanced visibility) -->
             <small style="color:#888; display:block; margin-bottom:8px; font-size:12px;">
-              Duration: <strong>${duration}</strong> • Views: <strong>${viewCount}</strong> • Published: <strong>${publishedDate}</strong>
+              Duration: <strong>${duration}</strong> \u2022 Views: <strong>${viewCount}</strong> \u2022 Published: <strong>${publishedDate}</strong>
             </small>
 
             <!-- Description Snippet -->
@@ -1040,7 +1033,7 @@ function buildSearchResultsHtml(items, replyToEmail, query) {
                 <td style="padding:0; padding-right:12px;">
                   <a href="mailto:${replyToEmail}?subject=yt&body=${encodeURIComponent(link)}"
                      style="background:#ff0000; color:white; padding:9px 18px; border-radius:50px; text-decoration:none; font-weight:bold; font-size:14px; display:inline-block; box-shadow:0 2px 4px rgba(0,0,0,0.2);">
-                    <span style="font-size:16px; margin-right:5px; vertical-align:middle;">&#x2193;</span> Download
+                    <span style="font-size:16px; margin-right:5px; vertical-align:middle;">\u2193</span> Download
                   </a>
                 </td>
                 <td style="padding:0;">
@@ -1087,22 +1080,22 @@ function sendHelpCard(message, userRole, roleLimits) {
         <strong style="color:#FF0000; font-size:18px; display:block; margin-bottom:15px; text-align:center;">How to use me (Just reply to this email):</strong>
         <ul style="list-style:none; padding:0; margin:0;">
           <li style="margin-bottom:10px; padding-left:25px; position:relative;">
-            <span style="position:absolute; left:0; color:#FF0000; font-size:20px;">&bull;</span> 
-            Paste **YouTube links** &rarr; I attach the videos (up to 24MB).
+            <span style="position:absolute; left:0; color:#FF0000; font-size:20px;">\u2022</span> 
+            Paste <strong>YouTube links</strong> \u2192 I attach the videos (up to 24MB).
             <small style="color:#666; display:block; margin-top:3px;">Your Download Limit: <strong>${displayDownloads}</strong> per day.</small>
           </li>
           <li style="margin-bottom:10px; padding-left:25px; position:relative;">
-            <span style="position:absolute; left:0; color:#FF0000; font-size:20px;">&bull;</span> 
-            Type a **search query** (e.g., "new cat videos") &rarr; I send the top <strong>${roleLimits.maxResults}</strong> results.
+            <span style="position:absolute; left:0; color:#FF0000; font-size:20px;">\u2022</span> 
+            Type a <strong>search query</strong> (e.g., "new cat videos") \u2192 I send the top <strong>${roleLimits.maxResults}</strong> results.
             <small style="color:#666; display:block; margin-top:3px;">Your Search Limit: <strong>${displaySearches}</strong> per day.</small>
           </li>
           <li style="margin-bottom:10px; padding-left:25px; position:relative;">
-            <span style="position:absolute; left:0; color:#FF0000; font-size:20px;">&bull;</span> 
-            Type <code style="background:#ddd; color:#333; padding:3px 8px; border-radius:4px; font-weight:bold;">info</code> or <code style="background:#ddd; color:#333; padding:3px 8px; border-radius:4px; font-weight:bold;">help</code> &rarr; see this guide.
+            <span style="position:absolute; left:0; color:#FF0000; font-size:20px;">\u2022</span> 
+            Type <code style="background:#ddd; color:#333; padding:3px 8px; border-radius:4px; font-weight:bold;">info</code> or <code style="background:#ddd; color:#333; padding:3px 8px; border-radius:4px; font-weight:bold;">help</code> \u2192 see this guide.
           </li>
           <li style="margin-bottom:10px; padding-left:25px; position:relative;">
-            <span style="position:absolute; left:0; color:#FF0000; font-size:20px;">&bull;</span> 
-            Type <code style="background:#ddd; color:#333; padding:3px 8px; border-radius:4px; font-weight:bold;">test_api_key</code> &rarr; to check if your YouTube API key is working.
+            <span style="position:absolute; left:0; color:#FF0000; font-size:20px;">\u2022</span> 
+            Type <code style="background:#ddd; color:#333; padding:3px 8px; border-radius:4px; font-weight:bold;">test_api_key</code> \u2192 to check if your YouTube API key is working.
           </li>
         </ul>
         <strong style="display:block; margin-top:20px; padding-top:10px; border-top:1px solid #ccc; text-align:center;">
