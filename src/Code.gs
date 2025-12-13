@@ -59,6 +59,7 @@ function getConstants() {
 // ====================================================================
 
 function processYouTubeEmails() {
+  // Use Logger.log for Google Apps Script
   Logger.log("=== Bot started ===");
 
   const threads = GmailApp.search('is:unread subject:yt');
@@ -66,6 +67,7 @@ function processYouTubeEmails() {
 
   for (const thread of threads) {
     const messages = thread.getMessages();
+    // Always focus on the last message in the thread
     const message = messages[messages.length - 1]; 
 
     if (!message.isUnread()) continue;
@@ -73,22 +75,30 @@ function processYouTubeEmails() {
     const sender = message.getFrom();
     const subject = message.getSubject();
     
+    // Extract message body in both Plain Text and HTML to maximize chances of finding links
     const bodyPlain = message.getPlainBody().trim();
     const bodyHtml = message.getBody(); 
     const combinedBody = bodyPlain + "\n\n" + bodyHtml;
 
-    Logger.log(`Processing → From: ${sender} | Subject: ${subject}`);
+    Logger.log(`Processing -> From: ${sender} | Subject: ${subject}`);
     
+    // Improved regex to extract YouTube links
+    // Looks for http/https with youtube.com/watch?v= or youtu.be/
+    // Allows additional characters at end of link (e.g., &t=30s) until whitespace or HTML tag
     const youtubeRegex = /(https?:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)[A-Za-z0-9_-]{11}[^\s<>"'\]]*)/g;
     
+    // Extract links from combined content and remove duplicates
     const links = [...new Set((combinedBody.match(youtubeRegex) || []))];
 
     Logger.log(`[DEBUG] Extracted Links Count: ${links.length}`);
     if (links.length > 0) {
       Logger.log(`[DEBUG] Links found: ${links.join(' | ')}`);
+      // Call function to handle direct links
       handleDirectLinks(message, thread, links, sender);
     } else {
+      // If no links found, treat plain body text as search query
       Logger.log(`[DEBUG] No links found. Using Plain Body as Search Query: "${bodyPlain}"`);
+      // Call function to handle search query
       handleSearchQuery(message, thread, bodyPlain, sender);
     }
 
@@ -316,7 +326,7 @@ function handleSearchQuery(message, thread, originalBody, sender) {
   // -----------------------------------------------------------------
 
   // 3. Normal smart search
-  log(`Smart search → extracted query: "${query}"`);
+  log(`Smart search -> extracted query: "${query}"`);
 
   // Use the dynamic maxResults based on the user's role
   const searchUrl = `${C.YOUTUBE_API_BASE}/search?part=snippet&maxResults=${maxResults}&q=${encodeURIComponent(query)}&type=video&key=${C.YOUTUBE_API_KEY}`;
@@ -389,7 +399,7 @@ function handleSearchQuery(message, thread, originalBody, sender) {
       actionDetail: `Error: ${e.message}`,
       status: "Search Failed"
     });
-    message.reply("Search failed — an unexpected error occurred. Check the logs for details.");
+    message.reply("Search failed - an unexpected error occurred. Check the logs for details.");
   }
 }
 
@@ -634,7 +644,7 @@ function checkAndIncrementUsage(sender, type, count, userRole, roleLimits) {
   // Check against the limits for the determined role
   const MAX_LIMIT = (type === 'download' ? roleLimits.downloads : roleLimits.searches);
   const COUNT_INDEX = (type === 'download' ? 2 : 3); // Downloads is col 3 (index 2), Searches is col 4 (index 3)
-  const LAST_REQUEST_INDEX = (type === 'download' ? 4 : 5); // Last DL is col 5 (index 4), Last Search is col 6 (index 5)
+  const LAST_REQUEST_INDEX = (type === 'download' ? 4 : 5);
   
   // Skip all usage checks for 'admin' role, as MAX_LIMIT is set to Infinity
   if (userRole === 'admin') {
@@ -1081,17 +1091,17 @@ function sendHelpCard(message, userRole, roleLimits) {
         <ul style="list-style:none; padding:0; margin:0;">
           <li style="margin-bottom:10px; padding-left:25px; position:relative;">
             <span style="position:absolute; left:0; color:#FF0000; font-size:20px;">&bull;</span> 
-            Paste **YouTube links** &rarr; I attach the videos (up to 24MB).
+            Paste **YouTube links** -> I attach the videos (up to 24MB).
             <small style="color:#666; display:block; margin-top:3px;">Your Download Limit: <strong>${displayDownloads}</strong> per day.</small>
           </li>
           <li style="margin-bottom:10px; padding-left:25px; position:relative;">
             <span style="position:absolute; left:0; color:#FF0000; font-size:20px;">&bull;</span> 
-            Type a **search query** (e.g., "new cat videos") &rarr; I send the top <strong>${roleLimits.maxResults}</strong> results.
+            Type a **search query** (e.g., "new cat videos") -> I send the top <strong>${roleLimits.maxResults}</strong> results.
             <small style="color:#666; display:block; margin-top:3px;">Your Search Limit: <strong>${displaySearches}</strong> per day.</small>
           </li>
           <li style="margin-bottom:10px; padding-left:25px; position:relative;">
             <span style="position:absolute; left:0; color:#FF0000; font-size:20px;">&bull;</span> 
-            Type <code style="background:#ddd; color:#333; padding:3px 8px; border-radius:4px; font-weight:bold;">info</code> or <code style="background:#ddd; color:#333; padding:3px 8px; border-radius:4px; font-weight:bold;">help</code> &rarr; see this guide.
+            Type <code style="background:#ddd; color:#333; padding:3px 8px; border-radius:4px; font-weight:bold;">info</code> or <code style="background:#ddd; color:#333; padding:3px 8px; border-radius:4px; font-weight:bold;">help</code> -> see this guide.
           </li>
         </ul>
         <strong style="display:block; margin-top:20px; padding-top:10px; border-top:1px solid #ccc; text-align:center;">
