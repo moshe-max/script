@@ -5,7 +5,7 @@
  */
 
 // ===================== CONSTANTS =====================
-const GEMINI_MODEL = 'models/gemini-2.0-flash';
+const GEMINI_MODEL = 'gemini-2.5-flash';
 const MAX_HISTORY = 50;
 const HISTORY_KEY = 'CHAT_HISTORY';
 const SYSTEM_PROMPT = 'You are a helpful, friendly AI assistant. Provide clear, concise, and accurate responses. Format your responses for readability using paragraphs and line breaks where appropriate.';
@@ -19,7 +19,7 @@ function onGmailMessageOpen() {
 function buildMainUI_() {
   const header = CardService.newCardHeader()
     .setTitle('💬 Gemini AI Chat')
-    .setSubtitle('Powered by Gemini 2.0 Flash');
+    .setSubtitle('Powered by Gemini 2.5 Flash');
 
   const card = CardService.newCardBuilder()
     .setHeader(header)
@@ -195,7 +195,7 @@ function callGemini_(history) {
       timeout: 60
     };
 
-    const url = `https://generativelanguage.googleapis.com/v1/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
     const response = UrlFetchApp.fetch(url, options);
     const status = response.getResponseCode();
     const text = response.getContentText();
