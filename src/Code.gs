@@ -397,7 +397,6 @@ function handleModeChange_(e) {
     chat.lastActive = new Date().toISOString();
     updateChat_(chatId, chat);
 
-    // Update usage
     const tokenEstimate = Math.ceil(text.length / 4) + Math.ceil(reply.length / 4);
     updateUsage_(tokenEstimate);
 
@@ -405,18 +404,13 @@ function handleModeChange_(e) {
 
   } catch (err) {
     console.error('Send error:', err);
-    return notify_('❌ ' + err.toString(), CardService.NotificationType.ERROR);
+    return notify_('Error: ' + err.toString(), CardService.NotificationType.ERROR);
   }
 }
 
 function resetUsage_() {
   PropertiesService.getUserProperties().deleteProperty(USAGE_KEY);
-  return notify_('🔄 Usage stats reset!', CardService.NotificationType.INFO);
-}
-
-function resetUsage_() {
-  PropertiesService.getUserProperties().deleteProperty(USAGE_KEY);
-  return notify_('🔄 Usage stats reset!', CardService.NotificationType.INFO);
+  return notify_('Usage stats reset!', CardService.NotificationType.INFO);
 }
 
 // ===================== GEMINI API =====================
