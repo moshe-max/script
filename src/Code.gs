@@ -163,3 +163,47 @@ function notify_(msg) {
     .setNavigation(CardService.newNavigation().updateCard(buildMainUI_()))
     .build();
 }
+function testGemini() {
+  const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
+  const url = 'https://generativelanguage.googleapis.com/v1/models/models/gemini-2.5-flash:generateContent?key=' + apiKey;
+
+  const payload = {
+    contents: [
+      {
+        role: 'user',
+        parts: [
+          { text: 'Hello, Gemini! Please respond briefly.' }
+        ]
+      }
+    ],
+    generationConfig: {
+      temperature: 0.5,
+      maxOutputTokens: 100
+    }
+  };
+
+  try {
+    const response = UrlFetchApp.fetch(url, {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+
+    const text = response.getContentText();
+
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (err) {
+      console.error('JSON parse error:', text);
+      return;
+    }
+
+    const reply = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    console.log('Gemini reply:', reply);
+
+  } catch (e) {
+    console.error('Request failed:', e);
+  }
+}
