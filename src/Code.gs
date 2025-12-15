@@ -163,23 +163,15 @@ function notify_(msg) {
     .setNavigation(CardService.newNavigation().updateCard(buildMainUI_()))
     .build();
 }
-function testGemini() {
+function testGeminiDebug() {
   const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
   const url = 'https://generativelanguage.googleapis.com/v1/models/models/gemini-2.5-flash:generateContent?key=' + apiKey;
 
   const payload = {
     contents: [
-      {
-        role: 'user',
-        parts: [
-          { text: 'Hello, Gemini! Please respond briefly.' }
-        ]
-      }
+      { role: 'user', parts: [{ text: 'Hello, Gemini! Please respond briefly.' }] }
     ],
-    generationConfig: {
-      temperature: 0.5,
-      maxOutputTokens: 100
-    }
+    generationConfig: { temperature: 0.5, maxOutputTokens: 100 }
   };
 
   try {
@@ -191,17 +183,19 @@ function testGemini() {
     });
 
     const text = response.getContentText();
+    console.log('Raw Response:', text);  // Log raw text before parsing
 
-    let data;
-    try {
-      data = JSON.parse(text);
-    } catch (err) {
-      console.error('JSON parse error:', text);
-      return;
+    if (text) {
+      try {
+        const data = JSON.parse(text);
+        const reply = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        console.log('Gemini reply:', reply);
+      } catch (err) {
+        console.error('JSON parse failed:', err);
+      }
+    } else {
+      console.warn('Empty response received');
     }
-
-    const reply = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    console.log('Gemini reply:', reply);
 
   } catch (e) {
     console.error('Request failed:', e);
