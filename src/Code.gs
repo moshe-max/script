@@ -75,23 +75,20 @@ function buildChatSection_() {
   const history = loadHistory_();
 
   if (!history.length) {
-    section.addWidget(
-      CardService.newTextParagraph().setText('👋 Select a mode and start chatting!')
-    );
+    section.addWidget(CardService.newTextParagraph().setText('👋 Select a mode and start chatting!'));
     return section;
   }
 
-  const CHUNK_SIZE = 500; // max chars per widget
+  const CHUNK_SIZE = 500;
   let lastRole = null;
   let buffer = '';
 
   history.forEach(msg => {
     const roleLabel = msg.role === 'user' ? '👤 You' : '🤖 Gemini';
 
-    if (lastRole === roleLabel) {
+    if (roleLabel === lastRole) {
       buffer += '\n' + msg.text;
     } else {
-      // flush previous buffer
       if (buffer) {
         for (let i = 0; i < buffer.length; i += CHUNK_SIZE) {
           section.addWidget(
@@ -107,7 +104,6 @@ function buildChatSection_() {
     }
   });
 
-  // flush remaining buffer
   if (buffer) {
     for (let i = 0; i < buffer.length; i += CHUNK_SIZE) {
       section.addWidget(
@@ -121,6 +117,7 @@ function buildChatSection_() {
 
   return section;
 }
+
 
 
 
