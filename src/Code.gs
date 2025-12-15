@@ -1,187 +1,436 @@
 /**
- * Gemini AI Chat – Enhanced Version
- * Works with gemini-2.0-flash or gemini-2.5-flash
- * Improved UI, error handling, and user experience
+ * Gemini AI Chat – Premium Edition with Multi-Chat & Usage Limits
+ * Multiple conversations, quota management, and analytics
  */
 
 // ===================== CONSTANTS =====================
 const GEMINI_MODEL = 'gemini-2.5-flash';
 const MAX_HISTORY = 50;
-const HISTORY_KEY = 'CHAT_HISTORY';
-const SYSTEM_PROMPT = 'You are a helpful, friendly AI assistant. Provide clear, concise, and accurate responses. Format your responses for readability using paragraphs and line breaks where appropriate.';
+const CHATS_KEY = 'ALL_CHATS';
+const CURRENT_CHAT_KEY = 'CURRENT_CHAT_ID';
+const SETTINGS_KEY = 'CHAT_SETTINGS';
+const USAGE_KEY = 'USAGE_STATS';
+
+// Daily usage limits
+const DAILY_LIMITS = {
+  messages: 100,
+  tokens: 100000
+};
+
+// System prompts for different modes
+const SYSTEM_PROMPTS = {
+  assistant: 'You are a helpful, friendly AI assistant. Provide clear, concise, and accurate responses.',
+  creative: 'You are a creative writing assistant. Be imaginative, engaging, and helpful. Write in an expressive style.',
+  technical: 'You are a technical expert. Provide detailed, accurate technical explanations with code examples when relevant.',
+  tutor: 'You are a patient tutor. Explain concepts clearly, use analogies, and help the user understand step-by-step.',
+  concise: 'Be extremely concise and direct. Answer in 1-2 sentences when possible.'
+};
 
 // ===================== ENTRY POINT =====================
 function onGmailMessageOpen() {
   return buildMainUI_();
 }
 
-// ===================== UI BUILDERS =====================
+// ===================== MAIN UI =====================
 function buildMainUI_() {
-  const header = CardService.newCardHeader()
-    .setTitle('💬 Gemini AI Chat')
-    .setSubtitle('Powered by Gemini 2.5 Flash');
-
-  const card = CardService.newCardBuilder()
-    .setHeader(header)
-    .addSection(buildHistorySection_())
-    .addSection(buildInputSection_());
-
-  return card.build();
+  const settings = loadSettings_();
+  const currentChatId = getCurrentChatId_();
+  
+  return CardService.newCardBuilder()
+    .setHeader(buildHeader_())
+    .addSection(buildUsageSection_())
+    .addSection(buildChatListSection_(currentChatId))
+    .addSection(buildModeSelector_(settings.mode || 'assistant'))
+    .addSection(buildChatSection_(currentChatId))
+    .addSection(buildInputSection_(settings))
+    .addSection(buildSettingsSection_(settings))
+    .build();
 }
 
-function buildHistorySection_() {
-  const section = CardService.newCardSection();
-  const history = loadHistory_();
+function buildHeader_() {
+  return CardService.newCardHeader()
+    .setTitle('💬 Gemini Multi-Chat')
+    .setSubtitle('Multiple conversations • Usage tracking • Smart limits');
+}
 
-  if (!history || history.length === 0) {
+// ===================== USAGE SECTION =====================
+function buildUsageSection_() {
+  const section = CardService.newCardSection().setHeader('📊 Daily Usage');
+  const usage = getUsageStats_();
+  
+  const messagesUsed = usage.messagesUsed || 0;
+  const tokensUsed = usage.tokensUsed || 0;
+  const messagePercent = Math.round((messagesUsed / DAILY_LIMITS.messages) * 100);
+  const tokenPercent = Math.round((tokensUsed / DAILY_LIMITS.tokens) * 100);
+
+  // Messages bar
+  let messageBar = '█'.repeat(Math.min(20, Math.ceil(messagePercent / 5))) + 
+                   '░'.repeat(20 - Math.ceil(messagePercent / 5));
+  section.addWidget(
+    CardService.newTextParagraph()
+      .setText(`💬 Messages: ${messagesUsed}/${DAILY_LIMITS.messages} (${messagePercent}%)\n${messageBar}`)
+  );
+
+  // Tokens bar
+  let tokenBar = '█'.repeat(Math.min(20, Math.ceil(tokenPercent / 5))) + 
+                 '░'.repeat(20 - Math.ceil(tokenPercent / 5));
+  section.addWidget(
+    CardService.newTextParagraph()
+      .setText(`🔤 Tokens: ${tokensUsed.toLocaleString()}/${DAILY_LIMITS.tokens.toLocaleString()} (${tokenPercent}%)\n${tokenBar}`)
+  );
+
+  // Status
+  let status = '✅ Normal';
+  if (messagePercent >= 90) status = '⚠️ Warning: Approaching message limit';
+  if (tokenPercent >= 90) status = '⚠️ Warning: Approaching token limit';
+  if (messagePercent >= 100 || tokenPercent >= 100) status = '❌ Daily limit reached! Reset tomorrow.';
+
+  section.addWidget(CardService.newTextParagraph().setText(status));
+
+  // Reset button
+  const resetBtn = CardService.newTextButton()
+    .setText('🔄 Manual Reset')
+    .setTextButtonStyle(CardService.TextButtonStyle.TEXT)
+    .setOnClickAction(CardService.newAction().setFunctionName('resetUsage_'));
+  
+  section.addWidget(CardService.newButtonSet().addButton(resetBtn));
+
+  return section;
+}
+
+// ===================== CHAT LIST SECTION =====================
+function buildChatListSection_(currentChatId) {
+  const section = CardService.newCardSection().setHeader('💾 Your Chats');
+  const allChats = getAllChats_();
+  
+  if (!allChats || Object.keys(allChats).length === 0) {
     section.addWidget(
       CardService.newTextParagraph()
-        .setText('👋 Start a new conversation below!')
+        .setText('No chats yet. Create a new one!')
+    );
+  } else {
+    // Show recent chats (max 5)
+    const chatIds = Object.keys(allChats).sort((a, b) => 
+      (allChats[b].lastActive || 0) - (allChats[a].lastActive || 0)
+    ).slice(0, 5);
+
+    chatIds.forEach(chatId => {
+      const chat = allChats[chatId];
+      const isActive = chatId === currentChatId;
+      const preview = chat.name || 'Untitled Chat';
+      const msgCount = (chat.messages || []).length;
+      
+      const btn = CardService.newTextButton()
+        .setText(`${isActive ? '→' : '  '} ${preview} (${msgCount})`)
+        .setTextButtonStyle(isActive ? CardService.TextButtonStyle.FILLED : CardService.TextButtonStyle.TEXT)
+        .setOnClickAction(
+          CardService.newAction()
+            .setFunctionName('switchChat_')
+            .addParameter('chatId', chatId)
+        );
+      
+      section.addWidget(CardService.newButtonSet().addButton(btn));
+    });
+  }
+
+  // New chat button
+  const newChatBtn = CardService.newTextButton()
+    .setText('➕ New Chat')
+    .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+    .setOnClickAction(CardService.newAction().setFunctionName('createNewChat_'));
+  
+  section.addWidget(CardService.newButtonSet().addButton(newChatBtn));
+
+  return section;
+}
+
+// ===================== MODE SELECTOR =====================
+function buildModeSelector_(currentMode) {
+  const section = CardService.newCardSection().setHeader('🎯 Mode');
+  
+  const modes = [
+    { id: 'assistant', icon: '🤖', label: 'Assistant' },
+    { id: 'creative', icon: '✨', label: 'Creative' },
+    { id: 'technical', icon: '⚙️', label: 'Technical' },
+    { id: 'tutor', icon: '📚', label: 'Tutor' },
+    { id: 'concise', icon: '⚡', label: 'Concise' }
+  ];
+
+  const buttons = modes.map(mode => {
+    const btn = CardService.newTextButton()
+      .setText(`${mode.icon} ${mode.label}`)
+      .setOnClickAction(
+        CardService.newAction()
+          .setFunctionName('setMode_')
+          .addParameter('mode', mode.id)
+      );
+    
+    if (currentMode === mode.id) {
+      btn.setTextButtonStyle(CardService.TextButtonStyle.FILLED);
+    } else {
+      btn.setTextButtonStyle(CardService.TextButtonStyle.TEXT);
+    }
+    
+    return btn;
+  });
+
+  section.addWidget(CardService.newButtonSet().addButton(buttons[0]).addButton(buttons[1]));
+  section.addWidget(CardService.newButtonSet().addButton(buttons[2]).addButton(buttons[3]).addButton(buttons[4]));
+
+  return section;
+}
+
+// ===================== CHAT SECTION =====================
+function buildChatSection_(chatId) {
+  const section = CardService.newCardSection().setHeader('💬 Messages');
+  const chat = getChat_(chatId);
+  const history = chat?.messages || [];
+
+  if (!history.length) {
+    section.addWidget(
+      CardService.newTextParagraph()
+        .setText('👋 No messages yet. Send your first message!')
     );
     return section;
   }
 
-  // Show last 10 messages for performance
-  const recentHistory = history.slice(-10);
+  // Show last 6 messages
+  const recent = history.slice(-6);
   
-  recentHistory.forEach((msg, idx) => {
+  recent.forEach((msg, idx) => {
     const isUser = msg.role === 'user';
     const label = isUser ? '👤 You' : '🤖 Gemini';
+    const truncated = truncateText_(msg.text, 250);
     
     const widget = CardService.newDecoratedText()
       .setTopLabel(label)
-      .setText(truncateText_(msg.text, 300))
+      .setText(truncated)
       .setWrapText(true);
     
-    // Light styling
-    if (isUser) {
-      widget.setEndIcon(CardService.newIconImage().setIconUrl(
-        'https://www.gstatic.com/images/branding/product/1x/chat_24dp.png'
-      ));
-    } else {
-      widget.setEndIcon(CardService.newIconImage().setIconUrl(
-        'https://www.gstatic.com/images/branding/product/1x/gemini_sparkle_24dp.png'
-      ));
+    if (!isUser) {
+      widget.setBottomLabel(formatTime_(msg.timestamp));
     }
     
     section.addWidget(widget);
-    
-    // Add divider between messages
-    if (idx < recentHistory.length - 1) {
-      section.addWidget(CardService.newDivider());
-    }
   });
 
   return section;
 }
 
-function buildInputSection_() {
-  const section = CardService.newCardSection()
-    .setHeader('Send a Message');
+// ===================== INPUT SECTION =====================
+function buildInputSection_(settings) {
+  const section = CardService.newCardSection().setHeader('📝 Message');
 
   section.addWidget(
     CardService.newTextInput()
       .setFieldName('prompt')
-      .setTitle('Your Message')
+      .setTitle('Type your message')
       .setMultiline(true)
-      .setHint('Ask Gemini anything...')
+      .setHint(`Chatting in ${settings.mode || 'assistant'} mode...`)
   );
 
-  const sendButton = CardService.newTextButton()
+  section.addWidget(
+    CardService.newSelectionInput()
+      .setType(CardService.SelectionInputType.RADIO_BUTTON)
+      .setFieldName('temperature')
+      .setTitle('Temperature')
+      .addItem('🎯 Precise (0.3)', '0.3', settings.temperature === '0.3')
+      .addItem('⚖️ Balanced (0.7)', '0.7', !settings.temperature || settings.temperature === '0.7')
+      .addItem('✨ Creative (1.0)', '1.0', settings.temperature === '1.0')
+  );
+
+  const sendBtn = CardService.newTextButton()
     .setText('📤 Send')
     .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
     .setOnClickAction(CardService.newAction().setFunctionName('handleSend_'));
 
-  const clearButton = CardService.newTextButton()
-    .setText('🔄 New Chat')
+  const deleteBtn = CardService.newTextButton()
+    .setText('🗑️ Delete Chat')
     .setTextButtonStyle(CardService.TextButtonStyle.TEXT)
-    .setOnClickAction(CardService.newAction().setFunctionName('handleClear_'));
+    .setOnClickAction(CardService.newAction().setFunctionName('deleteCurrentChat_'));
+
+  section.addWidget(CardService.newButtonSet().addButton(sendBtn).addButton(deleteBtn));
+
+  return section;
+}
+
+// ===================== SETTINGS SECTION =====================
+function buildSettingsSection_(settings) {
+  const section = CardService.newCardSection().setHeader('⚙️ Options');
 
   section.addWidget(
-    CardService.newButtonSet()
-      .addButton(sendButton)
-      .addButton(clearButton)
+    CardService.newSelectionInput()
+      .setType(CardService.SelectionInputType.RADIO_BUTTON)
+      .setFieldName('maxTokens')
+      .setTitle('Response Length')
+      .addItem('📄 Short (256)', '256', settings.maxTokens === '256')
+      .addItem('📃 Medium (512)', '512', !settings.maxTokens || settings.maxTokens === '512')
+      .addItem('📕 Long (1024)', '1024', settings.maxTokens === '1024')
   );
 
   return section;
 }
 
 // ===================== EVENT HANDLERS =====================
+function createNewChat_() {
+  const chatId = generateId_();
+  const allChats = getAllChats_();
+  
+  allChats[chatId] = {
+    id: chatId,
+    name: `Chat ${Object.keys(allChats).length + 1}`,
+    messages: [],
+    created: new Date().toISOString(),
+    lastActive: new Date().toISOString(),
+    mode: 'assistant'
+  };
+
+  saveAllChats_(allChats);
+  setCurrentChatId_(chatId);
+  
+  return notify_('✅ New chat created!', CardService.NotificationType.INFO);
+}
+
+function switchChat_(e) {
+  const chatId = e.parameters.chatId;
+  setCurrentChatId_(chatId);
+  
+  const chat = getChat_(chatId);
+  return notify_(`📂 Switched to: ${chat.name}`, CardService.NotificationType.INFO);
+}
+
+function deleteCurrentChat_() {
+  const chatId = getCurrentChatId_();
+  const allChats = getAllChats_();
+  
+  if (allChats[chatId]) {
+    delete allChats[chatId];
+    saveAllChats_(allChats);
+    
+    // Switch to another chat or create new one
+    const remaining = Object.keys(allChats);
+    if (remaining.length > 0) {
+      setCurrentChatId_(remaining[0]);
+    } else {
+      createNewChat_();
+    }
+  }
+  
+  return notify_('🗑️ Chat deleted', CardService.NotificationType.INFO);
+}
+
+function setMode_(e) {
+  const mode = e.parameters.mode;
+  const settings = loadSettings_();
+  settings.mode = mode;
+  saveSettings_(settings);
+  
+  const chatId = getCurrentChatId_();
+  const chat = getChat_(chatId);
+  chat.mode = mode;
+  updateChat_(chatId, chat);
+  
+  return refresh_();
+}
+
 function handleSend_(e) {
   const text = (e.formInput?.prompt || '').trim();
-  
+  const temperature = parseFloat(e.formInput?.temperature || 0.7);
+  const maxTokens = parseInt(e.formInput?.maxTokens || 512);
+
   if (!text) {
-    return notify_('Please enter a message.', CardService.TextButtonStyle.TEXT);
+    return notify_('✏️ Please enter a message.', CardService.NotificationType.INFO);
   }
 
   if (text.length > 5000) {
-    return notify_('Message too long. Keep it under 5000 characters.', CardService.TextButtonStyle.TEXT);
+    return notify_('⚠️ Message too long (max 5000 chars)', CardService.NotificationType.WARNING);
+  }
+
+  // Check usage limits
+  const usage = getUsageStats_();
+  if (usage.messagesUsed >= DAILY_LIMITS.messages) {
+    return notify_('❌ Daily message limit reached!', CardService.NotificationType.ERROR);
+  }
+  if (usage.tokensUsed >= DAILY_LIMITS.tokens) {
+    return notify_('❌ Daily token limit reached!', CardService.NotificationType.ERROR);
   }
 
   try {
-    let history = loadHistory_();
+    const settings = loadSettings_();
+    const chatId = getCurrentChatId_();
+    const chat = getChat_(chatId);
+    const mode = chat.mode || settings.mode || 'assistant';
     
-    // Add user message
+    let history = chat.messages || [];
+
     history.push({ 
       role: 'user', 
       text: text,
       timestamp: new Date().toISOString()
     });
 
-    // Trim history to prevent quota issues
-    if (history.length > MAX_HISTORY) {
-      history = history.slice(-MAX_HISTORY);
+    // Call Gemini
+    const reply = callGemini_(history, mode, temperature, maxTokens);
+    
+    if (reply.startsWith('❌')) {
+      return notify_(reply, CardService.NotificationType.ERROR);
     }
 
-    // Call Gemini
-    const reply = callGemini_(history);
-    
-    // Add assistant response
     history.push({ 
       role: 'model', 
       text: reply,
       timestamp: new Date().toISOString()
     });
 
-    saveHistory_(history);
+    if (history.length > MAX_HISTORY) {
+      history = history.slice(-MAX_HISTORY);
+    }
+
+    chat.messages = history;
+    chat.lastActive = new Date().toISOString();
+    updateChat_(chatId, chat);
+
+    // Update usage
+    const tokenEstimate = Math.ceil(text.length / 4) + Math.ceil(reply.length / 4);
+    updateUsage_(tokenEstimate);
+
     return refresh_();
 
   } catch (err) {
     console.error('Send error:', err);
-    return notify_('Error sending message: ' + err.toString(), CardService.TextButtonStyle.TEXT);
+    return notify_('❌ ' + err.toString(), CardService.NotificationType.ERROR);
   }
 }
 
-function handleClear_() {
-  try {
-    PropertiesService.getUserProperties().deleteProperty(HISTORY_KEY);
-    return notify_('Conversation cleared. Starting fresh! 🎉', CardService.TextButtonStyle.TEXT);
-  } catch (err) {
-    console.error('Clear error:', err);
-    return notify_('Error clearing history.', CardService.TextButtonStyle.TEXT);
-  }
+function resetUsage_() {
+  PropertiesService.getUserProperties().deleteProperty(USAGE_KEY);
+  return notify_('🔄 Usage stats reset!', CardService.NotificationType.INFO);
 }
 
-// ===================== GEMINI API CALL =====================
-function callGemini_(history) {
+// ===================== GEMINI API =====================
+function callGemini_(history, mode, temperature, maxTokens) {
   const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
   
   if (!apiKey) {
-    return '❌ Error: GEMINI_API_KEY not configured. Please add your API key to Script Properties.';
+    return '❌ API key not configured';
   }
 
   try {
-    // Build contents array - only include actual conversation, not system prompt
-    const contents = history.map(msg => ({
-      role: msg.role === 'user' ? 'user' : 'model',
-      parts: [{ text: msg.text }]
-    }));
+    const systemPrompt = SYSTEM_PROMPTS[mode] || SYSTEM_PROMPTS.assistant;
+    const contents = [{ role: 'user', parts: [{ text: systemPrompt }] }];
+
+    history.forEach(msg => {
+      contents.push({
+        role: msg.role,
+        parts: [{ text: msg.text }]
+      });
+    });
 
     const payload = {
-      contents: contents,
+      contents,
       generationConfig: {
-        temperature: 0.7,
-        maxOutputTokens: 1024,
+        temperature,
+        maxOutputTokens: maxTokens,
         topP: 0.95,
         topK: 64
       }
@@ -200,101 +449,159 @@ function callGemini_(history) {
     const status = response.getResponseCode();
     const text = response.getContentText();
 
-    // Log for debugging
-    console.log('Status:', status);
-    console.log('Response:', text.substring(0, 500));
+    let data = JSON.parse(text);
 
-    // Parse response
-    let data;
-    try {
-      data = JSON.parse(text);
-    } catch (parseErr) {
-      console.error('JSON parse error:', text);
-      return '❌ Failed to parse response. Check logs and API key.';
-    }
-
-    // Handle API errors
     if (status !== 200) {
-      const errorMsg = data.error?.message || 'Unknown API error';
-      console.error(`Gemini API error (${status}):`, errorMsg);
-      return `❌ API Error (${status}): ${errorMsg}`;
+      return `❌ API Error: ${data.error?.message || 'Unknown'}`;
     }
 
-    // Extract response text - handle both response formats
-    let reply = null;
-    
-    if (data.candidates && data.candidates.length > 0) {
-      const candidate = data.candidates[0];
-      if (candidate.content && candidate.content.parts && candidate.content.parts.length > 0) {
-        reply = candidate.content.parts[0].text;
-      }
-    }
+    const reply = data.candidates?.[0]?.content?.parts?.[0]?.text;
     
     if (!reply) {
-      console.error('No text in response. Full response:', JSON.stringify(data));
-      return '❌ Gemini returned an empty response. Try again.';
+      return '❌ Empty response from Gemini';
     }
 
     return reply;
 
   } catch (err) {
-    console.error('Gemini request exception:', err.toString());
-    return `❌ Error: ${err.toString()}`;
+    console.error('API Error:', err);
+    return `❌ ${err.toString()}`;
   }
 }
 
-// ===================== STORAGE OPERATIONS =====================
-function loadHistory_() {
+// ===================== CHAT STORAGE =====================
+function getAllChats_() {
   try {
-    const data = PropertiesService.getUserProperties().getProperty(HISTORY_KEY);
-    return data ? JSON.parse(data) : [];
+    const data = PropertiesService.getUserProperties().getProperty(CHATS_KEY);
+    return data ? JSON.parse(data) : {};
   } catch (err) {
-    console.error('Load history error:', err);
-    return [];
+    return {};
   }
 }
 
-function saveHistory_(history) {
+function saveAllChats_(chats) {
   try {
-    const json = JSON.stringify(history);
+    PropertiesService.getUserProperties().setProperty(CHATS_KEY, JSON.stringify(chats));
+  } catch (err) {
+    console.error('Save error:', err);
+  }
+}
+
+function getChat_(chatId) {
+  const allChats = getAllChats_();
+  return allChats[chatId] || { id: chatId, name: 'Chat', messages: [], mode: 'assistant' };
+}
+
+function updateChat_(chatId, chat) {
+  const allChats = getAllChats_();
+  allChats[chatId] = chat;
+  saveAllChats_(allChats);
+}
+
+function getCurrentChatId_() {
+  let chatId = PropertiesService.getUserProperties().getProperty(CURRENT_CHAT_KEY);
+  
+  if (!chatId) {
+    const allChats = getAllChats_();
+    const chatIds = Object.keys(allChats);
     
-    // Check size before saving (Apps Script has limits)
-    if (json.length > 100000) {
-      // Keep only recent history if too large
-      history = history.slice(-20);
+    if (chatIds.length === 0) {
+      chatId = generateId_();
+      const newChat = {
+        id: chatId,
+        name: 'Chat 1',
+        messages: [],
+        created: new Date().toISOString(),
+        lastActive: new Date().toISOString(),
+        mode: 'assistant'
+      };
+      allChats[chatId] = newChat;
+      saveAllChats_(allChats);
+    } else {
+      chatId = chatIds[0];
     }
     
-    PropertiesService.getUserProperties().setProperty(HISTORY_KEY, JSON.stringify(history));
+    setCurrentChatId_(chatId);
+  }
+  
+  return chatId;
+}
+
+function setCurrentChatId_(chatId) {
+  PropertiesService.getUserProperties().setProperty(CURRENT_CHAT_KEY, chatId);
+}
+
+// ===================== USAGE TRACKING =====================
+function getUsageStats_() {
+  try {
+    const data = PropertiesService.getUserProperties().getProperty(USAGE_KEY);
+    if (!data) return { messagesUsed: 0, tokensUsed: 0, resetDate: new Date().toISOString() };
+    
+    const stats = JSON.parse(data);
+    const resetDate = new Date(stats.resetDate);
+    const now = new Date();
+    
+    // Reset if new day
+    if (resetDate.toDateString() !== now.toDateString()) {
+      return { messagesUsed: 0, tokensUsed: 0, resetDate: now.toISOString() };
+    }
+    
+    return stats;
   } catch (err) {
-    console.error('Save history error:', err);
+    return { messagesUsed: 0, tokensUsed: 0, resetDate: new Date().toISOString() };
   }
 }
 
-// ===================== UI HELPERS =====================
+function updateUsage_(tokensUsed) {
+  const usage = getUsageStats_();
+  usage.messagesUsed = (usage.messagesUsed || 0) + 1;
+  usage.tokensUsed = (usage.tokensUsed || 0) + tokensUsed;
+  
+  PropertiesService.getUserProperties().setProperty(USAGE_KEY, JSON.stringify(usage));
+}
+
+// ===================== SETTINGS =====================
+function loadSettings_() {
+  try {
+    const data = PropertiesService.getUserProperties().getProperty(SETTINGS_KEY);
+    return data ? JSON.parse(data) : {};
+  } catch (err) {
+    return {};
+  }
+}
+
+function saveSettings_(settings) {
+  try {
+    PropertiesService.getUserProperties().setProperty(SETTINGS_KEY, JSON.stringify(settings));
+  } catch (err) {
+    console.error('Settings save error:', err);
+  }
+}
+
+// ===================== HELPERS =====================
 function refresh_() {
   return CardService.newActionResponseBuilder()
-    .setNavigation(
-      CardService.newNavigation()
-        .updateCard(buildMainUI_())
-    )
+    .setNavigation(CardService.newNavigation().updateCard(buildMainUI_()))
     .build();
 }
 
-function notify_(message, style = CardService.TextButtonStyle.FILLED) {
+function notify_(message, type = CardService.NotificationType.INFO) {
   return CardService.newActionResponseBuilder()
-    .setNotification(
-      CardService.newNotification()
-        .setText(message)
-        .setType(CardService.NotificationType.INFO)
-    )
-    .setNavigation(
-      CardService.newNavigation()
-        .updateCard(buildMainUI_())
-    )
+    .setNotification(CardService.newNotification().setText(message).setType(type))
+    .setNavigation(CardService.newNavigation().updateCard(buildMainUI_()))
     .build();
 }
 
 function truncateText_(text, maxLength) {
-  if (text.length <= maxLength) return text;
-  return text.substring(0, maxLength) + '...';
+  return text.length <= maxLength ? text : text.substring(0, maxLength) + '...';
+}
+
+function formatTime_(timestamp) {
+  if (!timestamp) return '';
+  const date = new Date(timestamp);
+  return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
+}
+
+function generateId_() {
+  return 'chat_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
 }
