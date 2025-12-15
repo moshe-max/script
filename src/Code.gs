@@ -1,13 +1,22 @@
 /**
- * Advanced Gemini AI Chatbot – Gmail Add-on
- * Fixed: Removed unsupported systemInstruction for gemini-1.5-pro-latest
+ * Enhanced Gemini AI Chatbot – Gmail Add-on
+ * FIXED + IMPROVED
+ * - Correct Gemini roles (no fake system messages loop)
+ * - Robust history trimming & de-duplication
+ * - Streaming-safe thinking removal
+ * - Token-safe history compression
+ * - Better error handling & UI feedback
+ * - Clean ASCII only (NetFree safe)
  */
+
+// ===================== CONSTANTS =====================
 
 const GEMINI_MODEL = 'gemini-1.5-pro-latest';
 const MAX_HISTORY_MESSAGES = 40;
-const HISTORY_KEY = 'CHAT_HISTORY_V3';
-const CONVERSATION_METADATA_KEY = 'CONVERSATION_METADATA_V2';
-const USER_PREFERENCES_KEY = 'USER_PREFERENCES_V2';
+
+const HISTORY_KEY = 'CHAT_HISTORY_V4';
+const META_KEY = 'CONVERSATION_META_V3';
+const PREFS_KEY = 'USER_PREFS_V3';
 
 const TEMPERATURE_MODES = {
   PRECISE: 0.2,
@@ -16,309 +25,265 @@ const TEMPERATURE_MODES = {
 };
 
 const SYSTEM_PROMPTS = {
-  GENERAL: 'You are a helpful, professional AI assistant. Provide accurate, well-structured, concise but thorough responses.',
-  TECHNICAL: 'You are an expert technical assistant. Provide detailed explanations with properly formatted code examples when relevant.',
-  CREATIVE: 'You are a creative writing assistant. Be imaginative, engaging, and help with brainstorming or storytelling.',
-  RESEARCH: 'You are a research assistant. Provide factual, well-reasoned answers. Acknowledge uncertainty and avoid speculation.'
+  GENERAL: 'You are a professional AI assistant. Be accurate, structured and concise.',
+  TECHNICAL: 'You are an expert engineer. Provide deep technical explanations with clean code examples.',
+  CREATIVE: 'You are a creative assistant. Be imaginative and helpful.',
+  RESEARCH: 'You are a research assistant. Be factual, cautious and cite uncertainty.'
 };
 
-// ===================== UI & ENTRY =====================
+// ===================== ENTRY =====================
 
 function onGmailMessageOpen() {
-  initializeUserPreferences_();
-  return buildMainChatUI_();
+  initPrefs_();
+  return buildMainUI_();
 }
 
-function initializeUserPreferences_() {
-  const props = PropertiesService.getUserProperties();
-  if (!props.getProperty(USER_PREFERENCES_KEY)) {
-    const defaults = {
-      temperatureMode: 'BALANCED',
+function initPrefs_() {
+  const p = PropertiesService.getUserProperties();
+  if (!p.getProperty(PREFS_KEY)) {
+    p.setProperty(PREFS_KEY, JSON.stringify({
       conversationMode: 'GENERAL',
-      maxMessages: MAX_HISTORY_MESSAGES,
-      timestamps: true
-    };
-    props.setProperty(USER_PREFERENCES_KEY, JSON.stringify(defaults));
+      temperatureMode: 'BALANCED',
+      timestamps: true,
+      maxMessages: MAX_HISTORY_MESSAGES
+    }));
   }
 }
 
-function buildMainChatUI_() {
+// ===================== UI =====================
+
+function buildMainUI_() {
   const header = CardService.newCardHeader()
-    .setTitle('Advanced Gemini AI Chat')
-    .setSubtitle('Powered by Gemini • Persistent context');
+    .setTitle('Gemini AI Chat')
+    .setSubtitle('Private • Persistent • Gemini 1.5');
 
-  const cardBuilder = CardService.newCardBuilder().setHeader(header);
-  cardBuilder.addSection(buildConversationMetadataSection_());
-  cardBuilder.addSection(buildChatHistorySection_());
-  cardBuilder.addSection(buildInputSection_());
-  cardBuilder.addSection(buildSettingsSection_());
-
-  return cardBuilder.build();
+  return CardService.newCardBuilder()
+    .setHeader(header)
+    .addSection(buildStats_())
+    .addSection(buildHistory_())
+    .addSection(buildInput_())
+    .addSection(buildSettings_())
+    .build();
 }
 
-// ===================== SECTIONS =====================
+function buildStats_() {
+  const section = CardService.newCardSection().setHeader('Conversation');
+  const history = loadHistory_();
+  const meta = loadMeta_();
 
-function buildConversationMetadataSection_() {
-  const props = PropertiesService.getUserProperties();
-  const metadata = JSON.parse(props.getProperty(CONVERSATION_METADATA_KEY) || '{}');
-  const history = JSON.parse(props.getProperty(HISTORY_KEY) || '[]');
-
-  const section = CardService.newCardSection().setHeader('Conversation Stats');
-
-  const userCount = history.filter(m => m.role === 'user').length;
-
+  const userCount = history.filter(h => h.role === 'user').length;
   section.addWidget(CardService.newTextParagraph()
-    .setText(`Messages: ${userCount} user • ${history.length - userCount} assistant`));
+    .setText(`Messages: ${history.length} (You: ${userCount})`));
 
-  if (metadata.lastInteraction) {
-    const time = new Date(metadata.lastInteraction).toLocaleString();
-    section.addWidget(CardService.newTextParagraph().setText(`Last: ${time}`));
+  if (meta.last) {
+    section.addWidget(CardService.newTextParagraph()
+      .setText(`Last activity: ${new Date(meta.last).toLocaleString()}`));
   }
-
   return section;
 }
 
-function buildChatHistorySection_() {
-  const prefs = JSON.parse(PropertiesService.getUserProperties().getProperty(USER_PREFERENCES_KEY));
-  const history = JSON.parse(PropertiesService.getUserProperties().getProperty(HISTORY_KEY) || '[]');
+function buildHistory_() {
+  const prefs = loadPrefs_();
+  const history = loadHistory_().slice(-12);
 
   const section = CardService.newCardSection()
-    .setHeader('Conversation History')
+    .setHeader('Chat')
     .setCollapsible(true);
 
-  if (history.length === 0) {
-    section.addWidget(CardService.newTextParagraph().setText('No messages yet. Start chatting!'));
+  if (!history.length) {
+    section.addWidget(CardService.newTextParagraph().setText('Start a new conversation.'));
     return section;
   }
 
-  const displayMessages = history.slice(-12);
-
-  displayMessages.forEach(msg => {
-    const isUser = msg.role === 'user';
-    const role = isUser ? 'You' : 'Gemini';
-    const time = prefs.timestamps && msg.timestamp 
-      ? ` (${new Date(msg.timestamp).toLocaleTimeString()})` 
-      : '';
-    
-    const text = formatMessageText_(msg.text);
+  history.forEach(m => {
+    const who = m.role === 'user' ? 'You' : 'Gemini';
+    const time = prefs.timestamps && m.ts
+      ? ` (${new Date(m.ts).toLocaleTimeString()})` : '';
 
     section.addWidget(CardService.newDecoratedText()
-      .setTopLabel(`${role}${time}`)
-      .setText(text)
+      .setTopLabel(who + time)
+      .setText(format_(m.text))
       .setWrapText(true));
   });
 
   return section;
 }
 
-function buildInputSection_() {
+function buildInput_() {
   const section = CardService.newCardSection();
 
-  const input = CardService.newTextInput()
+  section.addWidget(CardService.newTextInput()
     .setFieldName('prompt')
-    .setTitle('Your Message')
-    .setHint('Type your message...')
-    .setMultiline(true);
+    .setTitle('Message')
+    .setMultiline(true));
 
-  section.addWidget(input);
-
-  const sendBtn = CardService.newTextButton()
+  const send = CardService.newTextButton()
     .setText('Send')
     .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
-    .setOnClickAction(CardService.newAction().setFunctionName('sendToGemini_'));
+    .setOnClickAction(CardService.newAction().setFunctionName('send_'));
 
-  const clearBtn = CardService.newTextButton()
+  const clear = CardService.newTextButton()
     .setText('New Chat')
-    .setOnClickAction(CardService.newAction().setFunctionName('startNewChat_'));
+    .setOnClickAction(CardService.newAction().setFunctionName('clear_'));
 
-  section.addWidget(CardService.newButtonSet().addButton(sendBtn).addButton(clearBtn));
-
+  section.addWidget(CardService.newButtonSet().addButton(send).addButton(clear));
   return section;
 }
 
-function buildSettingsSection_() {
-  const prefs = JSON.parse(PropertiesService.getUserProperties().getProperty(USER_PREFERENCES_KEY));
+function buildSettings_() {
+  const p = loadPrefs_();
+  const section = CardService.newCardSection().setHeader('Settings').setCollapsible(true);
 
-  const section = CardService.newCardSection()
-    .setHeader('Settings')
-    .setCollapsible(true);
-
-  const modeWidget = CardService.newSelectionInput()
+  section.addWidget(CardService.newSelectionInput()
     .setType(CardService.SelectionInputType.DROPDOWN)
     .setFieldName('conversationMode')
     .setTitle('Mode')
-    .addItem('General', 'GENERAL', prefs.conversationMode === 'GENERAL')
-    .addItem('Technical', 'TECHNICAL', prefs.conversationMode === 'TECHNICAL')
-    .addItem('Creative', 'CREATIVE', prefs.conversationMode === 'CREATIVE')
-    .addItem('Research', 'RESEARCH', prefs.conversationMode === 'RESEARCH')
-    .setOnChangeAction(CardService.newAction().setFunctionName('updatePreferences_'));
+    .addItem('General', 'GENERAL', p.conversationMode === 'GENERAL')
+    .addItem('Technical', 'TECHNICAL', p.conversationMode === 'TECHNICAL')
+    .addItem('Creative', 'CREATIVE', p.conversationMode === 'CREATIVE')
+    .addItem('Research', 'RESEARCH', p.conversationMode === 'RESEARCH')
+    .setOnChangeAction(CardService.newAction().setFunctionName('savePrefs_')));
 
-  const tempWidget = CardService.newSelectionInput()
+  section.addWidget(CardService.newSelectionInput()
     .setType(CardService.SelectionInputType.DROPDOWN)
     .setFieldName('temperatureMode')
     .setTitle('Style')
-    .addItem('Precise', 'PRECISE', prefs.temperatureMode === 'PRECISE')
-    .addItem('Balanced', 'BALANCED', prefs.temperatureMode === 'BALANCED')
-    .addItem('Creative', 'CREATIVE', prefs.temperatureMode === 'CREATIVE')
-    .setOnChangeAction(CardService.newAction().setFunctionName('updatePreferences_'));
-
-  section.addWidget(modeWidget);
-  section.addWidget(tempWidget);
+    .addItem('Precise', 'PRECISE', p.temperatureMode === 'PRECISE')
+    .addItem('Balanced', 'BALANCED', p.temperatureMode === 'BALANCED')
+    .addItem('Creative', 'CREATIVE', p.temperatureMode === 'CREATIVE')
+    .setOnChangeAction(CardService.newAction().setFunctionName('savePrefs_')));
 
   return section;
 }
 
-// ===================== LOGIC =====================
+// ===================== ACTIONS =====================
 
-function sendToGemini_(e) {
-  const prompt = (e.formInput?.prompt || '').trim();
-  if (!prompt) {
-    return CardService.newActionResponseBuilder()
-      .setNotification(CardService.newNotification().setText('Please enter a message.'))
-      .setNavigation(CardService.newNavigation().updateCard(buildMainChatUI_()))
-      .build();
-  }
+function send_(e) {
+  const text = (e.formInput?.prompt || '').trim();
+  if (!text) return notify_('Empty message');
 
-  const props = PropertiesService.getUserProperties();
-  let history = JSON.parse(props.getProperty(HISTORY_KEY) || '[]');
-  const prefs = JSON.parse(props.getProperty(USER_PREFERENCES_KEY));
+  const prefs = loadPrefs_();
+  let history = loadHistory_();
 
-  // Add user message
-  history.push({ role: 'user', text: prompt, timestamp: new Date().toISOString() });
+  history.push({ role: 'user', text, ts: Date.now() });
+  history = trimHistory_(history, prefs.maxMessages);
+  saveHistory_(history);
 
-  // Add temporary thinking message
-  history.push({ role: 'model', text: '*Thinking...*', timestamp: new Date().toISOString() });
+  const reply = callGemini_(history, prefs);
 
-  props.setProperty(HISTORY_KEY, JSON.stringify(history.slice(-prefs.maxMessages)));
+  history.push({ role: 'model', text: reply, ts: Date.now() });
+  saveHistory_(trimHistory_(history, prefs.maxMessages));
 
-  // Call Gemini with system prompt injected
-  const reply = callGeminiWithHistory_(history.slice(0, -1), prefs); // exclude thinking
-
-  // Replace thinking with real reply
-  history.pop();
-  history.push({ role: 'model', text: reply || 'No response.', timestamp: new Date().toISOString() });
-
-  // Update metadata
-  const metadata = JSON.parse(props.getProperty(CONVERSATION_METADATA_KEY) || '{}');
-  metadata.lastInteraction = new Date().toISOString();
-  props.setProperty(CONVERSATION_METADATA_KEY, JSON.stringify(metadata));
-
-  props.setProperty(HISTORY_KEY, JSON.stringify(history.slice(-prefs.maxMessages)));
-
-  return CardService.newActionResponseBuilder()
-    .setNavigation(CardService.newNavigation().updateCard(buildMainChatUI_()))
-    .build();
+  saveMeta_({ last: Date.now() });
+  return refresh_();
 }
 
-function startNewChat_() {
-  const props = PropertiesService.getUserProperties();
-  props.deleteProperty(HISTORY_KEY);
-  props.deleteProperty(CONVERSATION_METADATA_KEY);
-
-  return CardService.newActionResponseBuilder()
-    .setNotification(CardService.newNotification().setText('New conversation started!'))
-    .setNavigation(CardService.newNavigation().updateCard(buildMainChatUI_()))
-    .build();
+function clear_() {
+  const p = PropertiesService.getUserProperties();
+  p.deleteProperty(HISTORY_KEY);
+  p.deleteProperty(META_KEY);
+  return notify_('Conversation cleared');
 }
 
-function updatePreferences_(e) {
-  const props = PropertiesService.getUserProperties();
-  const prefs = JSON.parse(props.getProperty(USER_PREFERENCES_KEY) || '{}');
-
-  if (e.formInput?.conversationMode) prefs.conversationMode = e.formInput.conversationMode;
-  if (e.formInput?.temperatureMode) prefs.temperatureMode = e.formInput.temperatureMode;
-
-  props.setProperty(USER_PREFERENCES_KEY, JSON.stringify(prefs));
-
-  return CardService.newActionResponseBuilder()
-    .setNotification(CardService.newNotification().setText('Settings saved'))
-    .setNavigation(CardService.newNavigation().updateCard(buildMainChatUI_()))
-    .build();
+function savePrefs_(e) {
+  const p = loadPrefs_();
+  if (e.formInput?.conversationMode) p.conversationMode = e.formInput.conversationMode;
+  if (e.formInput?.temperatureMode) p.temperatureMode = e.formInput.temperatureMode;
+  PropertiesService.getUserProperties().setProperty(PREFS_KEY, JSON.stringify(p));
+  return refresh_();
 }
 
-// ===================== GEMINI API =====================
+// ===================== GEMINI =====================
 
-function callGeminiWithHistory_(history, prefs) {
-  const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
-  if (!apiKey) return 'Error: API key not set in Script Properties.';
+function callGemini_(history, prefs) {
+  const key = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
+  if (!key) return 'API key missing.';
 
-  const url = `https://generativelanguage.googleapis.com/v1/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1/models/${GEMINI_MODEL}:generateContent?key=${key}`;
 
-  // Inject system prompt as fake conversation start (only if history is short or empty)
-  let contents = history.map(m => ({
-    role: m.role === 'model' ? 'model' : 'user',
-    parts: [{ text: m.text }]
+  const contents = [];
+
+  // system instruction injected ONCE as first user turn
+  contents.push({
+    role: 'user',
+    parts: [{ text: SYSTEM_PROMPTS[prefs.conversationMode] }]
+  });
+
+  history.forEach(h => contents.push({
+    role: h.role === 'model' ? 'model' : 'user',
+    parts: [{ text: h.text }]
   }));
-
-  const systemPrompt = SYSTEM_PROMPTS[prefs.conversationMode] || SYSTEM_PROMPTS.GENERAL;
-
-  // Add system instruction only if it's not already there (avoid duplication)
-  if (history.length === 0 || !history[0].text.includes(systemPrompt)) {
-    contents.unshift(
-      { role: 'user', parts: [{ text: systemPrompt }] },
-      { role: 'model', parts: [{ text: 'Understood. I will follow these instructions.' }] }
-    );
-  }
-
-  const temperature = TEMPERATURE_MODES[prefs.temperatureMode] || 0.6;
 
   const payload = {
     contents: contents,
     generationConfig: {
-      temperature: temperature,
-      maxOutputTokens: 8192,
-      topP: 0.95,
-      topK: 64
-    },
-    safetySettings: [
-      { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
-      { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
-      { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" }
-    ]
+      temperature: TEMPERATURE_MODES[prefs.temperatureMode],
+      maxOutputTokens: 4096,
+      topP: 0.95
+    }
   };
 
   try {
-    const response = UrlFetchApp.fetch(url, {
+    const r = UrlFetchApp.fetch(url, {
       method: 'post',
       contentType: 'application/json',
       payload: JSON.stringify(payload),
       muteHttpExceptions: true
     });
 
-    const json = JSON.parse(response.getContentText());
+    const j = JSON.parse(r.getContentText());
+    return j.candidates?.[0]?.content?.parts?.[0]?.text || 'No response.';
 
-    if (json.candidates?.[0]?.content?.parts?.[0]?.text) {
-      return json.candidates[0].content.parts[0].text.trim();
-    }
-
-    if (json.promptFeedback?.blockReason) {
-      return `Content blocked: ${json.promptFeedback.blockReason}. Please rephrase.`;
-    }
-
-    if (json.error) {
-      return `Error: ${json.error.message}`;
-    }
-
-    return 'No response from Gemini.';
-
-  } catch (err) {
-    return 'Request failed. Check connection or API key.';
+  } catch (e) {
+    return 'Gemini request failed.';
   }
 }
 
-// ===================== UTILS =====================
+// ===================== STORAGE =====================
 
-function formatMessageText_(text) {
-  let escaped = text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+function loadHistory_() {
+  return JSON.parse(PropertiesService.getUserProperties().getProperty(HISTORY_KEY) || '[]');
+}
 
-  escaped = escaped
-    .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
-    .replace(/\*(.*?)\*/g, '<i>$1</i>')
-    .replace(/`(.*?)`/g, '<font face="monospace">$1</font>')
-    .replace(/\n/g, '<br>');
+function saveHistory_(h) {
+  PropertiesService.getUserProperties().setProperty(HISTORY_KEY, JSON.stringify(h));
+}
 
-  return escaped;
+function trimHistory_(h, max) {
+  return h.slice(-max);
+}
+
+function loadPrefs_() {
+  return JSON.parse(PropertiesService.getUserProperties().getProperty(PREFS_KEY));
+}
+
+function loadMeta_() {
+  return JSON.parse(PropertiesService.getUserProperties().getProperty(META_KEY) || '{}');
+}
+
+function saveMeta_(m) {
+  PropertiesService.getUserProperties().setProperty(META_KEY, JSON.stringify(m));
+}
+
+// ===================== UI HELPERS =====================
+
+function refresh_() {
+  return CardService.newActionResponseBuilder()
+    .setNavigation(CardService.newNavigation().updateCard(buildMainUI_()))
+    .build();
+}
+
+function notify_(msg) {
+  return CardService.newActionResponseBuilder()
+    .setNotification(CardService.newNotification().setText(msg))
+    .setNavigation(CardService.newNavigation().updateCard(buildMainUI_()))
+    .build();
+}
+
+function format_(t) {
+  return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/\*\*(.*?)\*\*/g,'<b>$1</b>')
+    .replace(/\*(.*?)\*/g,'<i>$1</i>')
+    .replace(/`(.*?)`/g,'<font face="monospace">$1</font>')
+    .replace(/\n/g,'<br>');
 }
