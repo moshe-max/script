@@ -1,6 +1,6 @@
 /**
  * Advanced Gemini AI Chatbot – Gmail Add-on
- * Clean version for restricted networks
+ * Fixed version – no async hacks, works reliably
  */
 
 const GEMINI_MODEL = 'gemini-1.5-pro-latest';
@@ -42,7 +42,7 @@ function initializeUserPreferences_() {
   }
 }
 
-function buildMainChatUI_(initialMessage = '', status = '') {
+function buildMainChatUI_() {
   const header = CardService.newCardHeader()
     .setTitle('Advanced Gemini AI Chat')
     .setSubtitle('Powered by Gemini • Persistent context');
@@ -50,7 +50,7 @@ function buildMainChatUI_(initialMessage = '', status = '') {
   const cardBuilder = CardService.newCardBuilder().setHeader(header);
   cardBuilder.addSection(buildConversationMetadataSection_());
   cardBuilder.addSection(buildChatHistorySection_());
-  cardBuilder.addSection(buildInputSection_(initialMessage, status));
+  cardBuilder.addSection(buildInputSection_());
   cardBuilder.addSection(buildSettingsSection_());
 
   return cardBuilder.build();
@@ -111,21 +111,16 @@ function buildChatHistorySection_() {
   return section;
 }
 
-function buildInputSection_(initialMessage = '', status = '') {
+function buildInputSection_() {
   const section = CardService.newCardSection();
 
   const input = CardService.newTextInput()
     .setFieldName('prompt')
     .setTitle('Your Message')
     .setHint('Type your message...')
-    .setMultiline(true)
-    .setValue(initialMessage);
+    .setMultiline(true);
 
   section.addWidget(input);
-
-  if (status) {
-    section.addWidget(CardService.newTextParagraph().setText(status));
-  }
 
   const sendBtn = CardService.newTextButton()
     .setText('Send')
@@ -180,45 +175,41 @@ function sendToGemini_(e) {
   if (!prompt) {
     return CardService.newActionResponseBuilder()
       .setNotification(CardService.newNotification().setText('Please enter a message.'))
-      .setNavigation(CardService.newNavigation().updateCard(buildMainChatUI_(prompt)))
+      .setNavigation(CardService.newNavigation().updateCard(buildMainChatUI_()))
       .build();
   }
 
-  const thinkingCard = buildMainChatUI_(prompt, 'Thinking...');
-  const response = CardService.newActionResponseBuilder()
-    .setNavigation(CardService.newNavigation().pushCard(thinkingCard));
-
-  response.setOnActionCompleteAction(
-    CardService.newAction()
-      .setFunctionName('handleGeminiResponse_')
-      .setParameters({ prompt: prompt })
-  );
-
-  return response.build();
-}
-
-function handleGeminiResponse_(e) {
-  const prompt = e.parameters.prompt;
   const props = PropertiesService.getUserProperties();
   let history = JSON.parse(props.getProperty(HISTORY_KEY) || '[]');
   const prefs = JSON.parse(props.getProperty(USER_PREFERENCES_KEY));
 
+  // Add user message
   history.push({ role: 'user', text: prompt, timestamp: new Date().toISOString() });
 
-  const { reply } = callGeminiWithHistory_(history, prefs);
+  // Add temporary "thinking" message
+  history.push({ role: 'model', text: '*Thinking...*', timestamp: new Date().toISOString() });
 
-  history.push({ role: 'model', text: reply, timestamp: new Date().toISOString() });
+  // Trim if needed (temporary)
+  if (history.length > prefs.maxMessages) history = history.slice(-prefs.maxMessages);
 
-  let metadata = JSON.parse(props.getProperty(CONVERSATION_METADATA_KEY) || '{}');
+  props.setProperty(HISTORY_KEY, JSON.stringify(history));
+
+  // Call Gemini (this happens synchronously)
+  const reply = callGeminiWithHistory_(history.slice(0, -1), prefs); // without the thinking message
+
+  // Replace the last (thinking) message with real reply
+  history.pop();
+  history.push({ role: 'model', text: reply || 'No response received.', timestamp: new Date().toISOString() });
+
+  // Update metadata
+  const metadata = JSON.parse(props.getProperty(CONVERSATION_METADATA_KEY) || '{}');
   metadata.lastInteraction = new Date().toISOString();
+  props.setProperty(CONVERSATION_METADATA_KEY, JSON.stringify(metadata));
 
-  history = history.slice(-prefs.maxMessages);
+  // Final save
+  props.setProperty(HISTORY_KEY, JSON.stringify(history.slice(-prefs.maxMessages)));
 
-  props.setProperties({
-    [HISTORY_KEY]: JSON.stringify(history),
-    [CONVERSATION_METADATA_KEY]: JSON.stringify(metadata)
-  });
-
+  // Refresh UI
   return CardService.newActionResponseBuilder()
     .setNavigation(CardService.newNavigation().updateCard(buildMainChatUI_()))
     .build();
@@ -254,7 +245,7 @@ function updatePreferences_(e) {
 
 function callGeminiWithHistory_(history, prefs) {
   const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
-  if (!apiKey) return { reply: 'Error: API key not set.' };
+  if (!apiKey) return 'Error: API key not set in Script Properties.';
 
   const url = `https://generativelanguage.googleapis.com/v1/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
 
@@ -293,21 +284,21 @@ function callGeminiWithHistory_(history, prefs) {
     const json = JSON.parse(response.getContentText());
 
     if (json.candidates?.[0]?.content?.parts?.[0]?.text) {
-      return { reply: json.candidates[0].content.parts[0].text.trim() };
+      return json.candidates[0].content.parts[0].text.trim();
     }
 
     if (json.promptFeedback?.blockReason) {
-      return { reply: `Content blocked. Please rephrase.` };
+      return `Content blocked: ${json.promptFeedback.blockReason}. Please rephrase.`;
     }
 
     if (json.error) {
-      return { reply: `Error: ${json.error.message}` };
+      return `Error: ${json.error.message}`;
     }
 
-    return { reply: 'No response. Try again.' };
+    return 'No response from Gemini.';
 
   } catch (err) {
-    return { reply: `Request failed.` };
+    return 'Request failed. Check your API key or internet connection.';
   }
 }
 
