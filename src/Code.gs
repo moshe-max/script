@@ -310,22 +310,6 @@ function deleteCurrentChat_() {
   return notify_('🗑️ Chat deleted', CardService.NotificationType.INFO);
 }
 
-function handleModeChange_(e) {
-  const mode = e.formInput?.mode;
-  if (!mode) return refresh_();
-  
-  const settings = loadSettings_();
-  settings.mode = mode;
-  saveSettings_(settings);
-  
-  const chatId = getCurrentChatId_();
-  const chat = getChat_(chatId);
-  chat.mode = mode;
-  updateChat_(chatId, chat);
-  
-  return refresh_();
-}
-
 function handleChatSwitch_(e) {
   const chatId = e.formInput?.selectedChat;
   
@@ -338,6 +322,22 @@ function handleChatSwitch_(e) {
     const chat = getChat_(chatId);
     return notify_(`📂 Switched to: ${chat.name}`, CardService.NotificationType.INFO);
   }
+  
+  return refresh_();
+}
+
+function handleModeChange_(e) {
+  const mode = e.formInput?.mode;
+  if (!mode) return refresh_();
+  
+  const settings = loadSettings_();
+  settings.mode = mode;
+  saveSettings_(settings);
+  
+  const chatId = getCurrentChatId_();
+  const chat = getChat_(chatId);
+  chat.mode = mode;
+  updateChat_(chatId, chat);
   
   return refresh_();
 }
@@ -407,6 +407,11 @@ function handleChatSwitch_(e) {
     console.error('Send error:', err);
     return notify_('❌ ' + err.toString(), CardService.NotificationType.ERROR);
   }
+}
+
+function resetUsage_() {
+  PropertiesService.getUserProperties().deleteProperty(USAGE_KEY);
+  return notify_('🔄 Usage stats reset!', CardService.NotificationType.INFO);
 }
 
 function resetUsage_() {
