@@ -173,34 +173,89 @@ function callGemini_(history, mode) {
   const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
   if (!apiKey) return '❌ GEMINI_API_KEY not set.';
 
-  const systemPrompt = SYSTEM_PROMPTS[mode] || SYSTEM_PROMPTS.assistant;
-  const contents = [{ text: systemPrompt }, ...history.map(m => ({ text: m.text }))];
-
-  const payload = {
-    content: contents.map(c => ({ text: c.text }))
-  };
-
   try {
-    const response = UrlFetchApp.fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
-      {
-        method: 'post',
-        contentType: 'application/json',
-        payload: JSON.stringify(payload),
-        muteHttpExceptions: true,
-        timeout: 60
+    // 1) System prompt + conversation -> contents format
+    const systemPrompt = SYSTEM_PROMPTS[mode] || SYSTEM_PROMPTS.assistant;
+    const contents = [];
+
+    // Push system prompt as first "contents" item with parts array
+    contents.push({
+      parts: [{ text: systemPrompt }]
+    });
+
+    // Append conversation: each element becomes a contents item with parts
+    (history || []).forEach(msg => {
+      contents.push({
+        parts: [{ text: msg.text }]
+      });
+    });
+
+    // 2) Payload: note the top-level key is 'contents' (array)
+    const payload = {
+      contents: contents
+    };
+
+    // 3) Send request
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+    const options = {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true,
+      timeout: 60
+    };
+
+    const resp = UrlFetchApp.fetch(url, options);
+    const status = resp.getResponseCode();
+    const body = resp.getContentText();
+
+    let data;
+    try { data = JSON.parse(body); }
+    catch (e) {
+      console.error('Failed to parse JSON from Gemini:', body);
+      return '❌ Failed to parse response from Gemini API.';
+    }
+
+    if (status !== 200) {
+      const msg = data?.error?.message || JSON.stringify(data).slice(0, 300);
+      console.error('Gemini API returned error:', status, msg);
+      return `❌ API Error: ${msg}`;
+    }
+
+    // 4) Extract reply — handle several response shapes used in examples
+    let reply = null;
+
+    // common shapes used historically:
+    // data.candidates[0].content[0].parts[0].text
+    // data.candidates[0].content.parts[0].text
+    // data.candidates[0].content[0].text
+    // data.candidates[0].content.text
+    try {
+      const c0 = data.candidates?.[0];
+      if (c0) {
+        // try nested content -> parts -> text
+        reply =
+          c0.content?.[0]?.parts?.[0]?.text ||
+          c0.content?.parts?.[0]?.text ||
+          c0.content?.[0]?.text ||
+          c0.content?.text ||
+          c0.output?.[0]?.text || // defensive
+          null;
       }
-    );
+    } catch (e) {
+      reply = null;
+    }
 
-    const status = response.getResponseCode();
-    const data = JSON.parse(response.getContentText());
+    if (!reply) {
+      console.warn('No text found in Gemini response, returning raw candidate for debugging.', JSON.stringify(data).slice(0,1000));
+      // fallback: return stringified candidate(s) so user sees what came back
+      return '⚠️ Empty text in response. Raw candidate: ' + (JSON.stringify(data.candidates || data).slice(0,1000));
+    }
 
-    if (status !== 200) return `❌ API Error: ${data.error?.message || 'Unknown error'}`;
-
-    const reply = data.candidates?.[0]?.content?.[0]?.text || '❌ Empty response';
     return reply;
 
   } catch (err) {
+    console.error('callGemini_ exception:', err);
     return `❌ Error: ${err.toString()}`;
   }
 }
