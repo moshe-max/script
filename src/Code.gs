@@ -4,7 +4,7 @@
  */
 
 /************ CONFIG ************/
-const GEMINI_MODEL = 'models/gemini-1.5-pro'; // ✅ VALID MODEL
+const GEMINI_MODEL = 'models/gemini-1.5-flash'; // ✅ VALID MODEL
 
 const TEMPERATURE_MODES = {
   normal: 0.7,
