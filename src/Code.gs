@@ -4,7 +4,7 @@
  */
 
 /************ CONFIG ************/
-const GEMINI_MODEL = 'models/gemini-1.5-flash'; // ✅ VALID MODEL
+const GEMINI_MODEL = 'models/gemini-1.5-pro'; // ✅ VALID MODEL
 
 const TEMPERATURE_MODES = {
   normal: 0.7,
@@ -17,6 +17,11 @@ const SYSTEM_PROMPTS = {
 };
 
 /************ ENTRY ************/
+function onGmailMessageOpen(e) {
+  return buildUI_();
+}
+
+// Gmail fallback entry point
 function onHomepage(e) {
   return buildUI_();
 }
