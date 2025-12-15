@@ -75,11 +75,13 @@ function buildChatSection_() {
   const history = loadHistory_();
 
   if (!history.length) {
-    section.addWidget(CardService.newTextParagraph().setText('👋 Select a mode and start chatting!'));
+    section.addWidget(
+      CardService.newTextParagraph().setText('👋 Select a mode and start chatting!')
+    );
     return section;
   }
 
-  const CHUNK_SIZE = 500; // safe per-widget display limit
+  const CHUNK_SIZE = 500; // max chars per widget
   let lastRole = null;
   let buffer = '';
 
@@ -119,6 +121,7 @@ function buildChatSection_() {
 
   return section;
 }
+
 
 
 
