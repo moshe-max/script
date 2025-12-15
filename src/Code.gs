@@ -309,30 +309,35 @@ function callGemini_(history, mode, temperature, maxTokens) {
   const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
   
   if (!apiKey) {
-    return '❌ ERROR: GEMINI_API_KEY not found in Script Properties. Please set the API key in the Script Properties.';
+    return '❌ ERROR: GEMINI_API_KEY not found in Script Properties.';
   }
 
   try {
     const systemPrompt = SYSTEM_PROMPTS[mode] || SYSTEM_PROMPTS.assistant;
 
+    // Build the contents array (system prompt + conversation)
     const contents = [];
-    contents.push({ role: 'user', parts: [{ text: systemPrompt }] });
+    contents.push({ text: systemPrompt, type: 'text' });
 
     history.forEach(msg => {
-      const role = msg.role === 'user' ? 'user' : 'model';
-      contents.push({ role: role, parts: [{ text: msg.text }] });
+      contents.push({ text: msg.text, type: 'text' });
     });
-        
+
+    // Payload structured for latest Gemini API
     const payload = {
-      contents: contents,
-      config: { 
-        temperature: temperature,
-        maxOutputTokens: maxTokens,
-        topP: 0.95,
-        topK: 64
+      temperature: temperature,
+      maxOutputTokens: maxTokens,
+      topP: 0.95,
+      topK: 64,
+      candidateCount: 1,
+      input: {
+        structuredInput: {
+          parts: contents.map(c => ({ text: c.text }))
+        }
       }
     };
 
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
     const options = {
       method: 'post',
       contentType: 'application/json',
@@ -341,7 +346,6 @@ function callGemini_(history, mode, temperature, maxTokens) {
       timeout: 60
     };
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
     const response = UrlFetchApp.fetch(url, options);
     const status = response.getResponseCode();
     const text = response.getContentText();
@@ -355,7 +359,8 @@ function callGemini_(history, mode, temperature, maxTokens) {
       return `❌ API Error: ${errorMsg}`;
     }
 
-    let reply = data.candidates?.[0]?.content?.parts?.[0]?.text || null;
+    // Extract the model reply
+    let reply = data.candidates?.[0]?.content?.[0]?.text || null;
     if (!reply && data.candidates?.[0]?.finishReason) {
       return `⚠️ Response blocked by model: ${data.candidates[0].finishReason}`;
     }
@@ -367,6 +372,7 @@ function callGemini_(history, mode, temperature, maxTokens) {
     return `❌ Error: ${err.toString()}`;
   }
 }
+
 
 // ===================== STORAGE =====================
 function loadHistory_() {
