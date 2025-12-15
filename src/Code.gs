@@ -120,13 +120,14 @@ function buildChatListSection_(currentChatId) {
       const preview = chat.name || 'Untitled Chat';
       const msgCount = (chat.messages || []).length;
       
-      const action = CardService.newAction().setFunctionName('switchChat_');
-      action.setParameter('chatId', chatId);
-      
       const btn = CardService.newTextButton()
         .setText(`${isActive ? '→' : '  '} ${preview} (${msgCount})`)
         .setTextButtonStyle(isActive ? CardService.TextButtonStyle.FILLED : CardService.TextButtonStyle.TEXT)
-        .setOnClickAction(action);
+        .setOnClickAction(
+          CardService.newAction()
+            .setFunctionName('switchChat_')
+            .setParameters({chatId: chatId})
+        );
       
       section.addWidget(CardService.newButtonSet().addButton(btn));
     });
