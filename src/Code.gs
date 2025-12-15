@@ -3,7 +3,7 @@
  * ---------------------------------------------
  * Pure AI chat interface deployed as a Gmail Add-on.
  * Persistent single-user chat.
- * 
+ * Text
  * REQUIREMENTS:
  * 1. Set Script Property: GEMINI_API_KEY
  * 2. Deploy as Gmail Add-on
