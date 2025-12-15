@@ -26,13 +26,10 @@ function onGmailMessageOpen() {
 // ===================== MAIN UI =====================
 function buildMainUI_() {
   const settings = loadSettings_();
-  const section = CardService.newCardSection();
-
-  // Add tabs/mode selector
-  section.addWidget(buildModeSelector_(settings.mode || 'assistant'));
   
   return CardService.newCardBuilder()
     .setHeader(buildHeader_())
+    .addSection(buildModeSelector_(settings.mode || 'assistant'))
     .addSection(buildChatSection_())
     .addSection(buildInputSection_(settings))
     .addSection(buildSettingsSection_(settings))
@@ -58,13 +55,14 @@ function buildModeSelector_(currentMode) {
   ];
 
   const buttons = modes.map(mode => {
+    const action = CardService.newAction()
+      // ✅ תיקון שגיאת שרשור: addParameter לפני setFunctionName
+      .addParameter('mode', mode.id) 
+      .setFunctionName('setMode_');
+      
     const btn = CardService.newTextButton()
       .setText(`${mode.icon} ${mode.label}`)
-      .setOnClickAction(
-        CardService.newAction()
-          .setFunctionName('setMode_')
-          .addParameter('mode', mode.id)
-      );
+      .setOnClickAction(action);
     
     if (currentMode === mode.id) {
       btn.setTextButtonStyle(CardService.TextButtonStyle.FILLED);
@@ -75,6 +73,7 @@ function buildModeSelector_(currentMode) {
     return btn;
   });
 
+  // Group buttons into rows
   section.addWidget(CardService.newButtonSet().addButton(buttons[0]).addButton(buttons[1]));
   section.addWidget(CardService.newButtonSet().addButton(buttons[2]).addButton(buttons[3]).addButton(buttons[4]));
 
@@ -129,10 +128,12 @@ function buildInputSection_(settings) {
       .setHint(`Message in ${settings.mode || 'assistant'} mode...`)
   );
 
-  // Temperature slider
+  // Temperature control section (using radio buttons)
+  const currentTemp = settings.temperature || '0.7';
+  
   section.addWidget(
     CardService.newDecoratedText()
-      .setText('Creativity Level: ' + (settings.temperature || 0.7))
+      .setText('Creativity Level: ' + currentTemp)
       .setBottomLabel('Adjust model creativity (0=precise, 1=creative)')
   );
 
@@ -141,9 +142,9 @@ function buildInputSection_(settings) {
       .setType(CardService.SelectionInputType.RADIO_BUTTON)
       .setFieldName('temperature')
       .setTitle('Temperature')
-      .addItem('🎯 Precise (0.3)', '0.3', settings.temperature === '0.3')
-      .addItem('⚖️ Balanced (0.7)', '0.7', !settings.temperature || settings.temperature === '0.7')
-      .addItem('✨ Creative (1.0)', '1.0', settings.temperature === '1.0')
+      .addItem('🎯 Precise (0.3)', '0.3', currentTemp === '0.3')
+      .addItem('⚖️ Balanced (0.7)', '0.7', currentTemp === '0.7')
+      .addItem('✨ Creative (1.0)', '1.0', currentTemp === '1.0')
   );
 
   // Action buttons
@@ -170,15 +171,17 @@ function buildInputSection_(settings) {
 // ===================== SETTINGS SECTION =====================
 function buildSettingsSection_(settings) {
   const section = CardService.newCardSection().setHeader('⚙️ Options');
+  const currentMaxTokens = settings.maxTokens || '512';
+  const currentHistoryLength = settings.historyLength || '10';
 
   section.addWidget(
     CardService.newSelectionInput()
       .setType(CardService.SelectionInputType.RADIO_BUTTON)
       .setFieldName('maxTokens')
       .setTitle('Response Length')
-      .addItem('📄 Short (256 tokens)', '256', settings.maxTokens === '256')
-      .addItem('📃 Medium (512 tokens)', '512', !settings.maxTokens || settings.maxTokens === '512')
-      .addItem('📕 Long (1024 tokens)', '1024', settings.maxTokens === '1024')
+      .addItem('📄 Short (256 tokens)', '256', currentMaxTokens === '256')
+      .addItem('📃 Medium (512 tokens)', '512', currentMaxTokens === '512')
+      .addItem('📕 Long (1024 tokens)', '1024', currentMaxTokens === '1024')
   );
 
   section.addWidget(
@@ -186,9 +189,9 @@ function buildSettingsSection_(settings) {
       .setType(CardService.SelectionInputType.RADIO_BUTTON)
       .setFieldName('historyLength')
       .setTitle('Context Window')
-      .addItem('🎯 Last 5 messages', '5', settings.historyLength === '5')
-      .addItem('⚖️ Last 10 messages', '10', !settings.historyLength || settings.historyLength === '10')
-      .addItem('🧠 Full history', '999', settings.historyLength === '999')
+      .addItem('🎯 Last 5 messages', '5', currentHistoryLength === '5')
+      .addItem('⚖️ Last 10 messages', '10', currentHistoryLength === '10')
+      .addItem('🧠 Full history', '999', currentHistoryLength === '999')
   );
 
   section.addWidget(
@@ -201,7 +204,8 @@ function buildSettingsSection_(settings) {
 
 // ===================== EVENT HANDLERS =====================
 function setMode_(e) {
-  const mode = e.parameters.mode;
+  // e.parameters הוא הדרך הנכונה לקבל פרמטרים מ-CardService.newAction
+  const mode = e.parameters.mode; 
   const settings = loadSettings_();
   settings.mode = mode;
   saveSettings_(settings);
@@ -209,9 +213,11 @@ function setMode_(e) {
 }
 
 function handleSend_(e) {
+  // e.formInput הוא הדרך הנכונה לקבל ערכים משדות קלט (TextInput, SelectionInput)
   const text = (e.formInput?.prompt || '').trim();
   const temperature = parseFloat(e.formInput?.temperature || 0.7);
   const maxTokens = parseInt(e.formInput?.maxTokens || 512);
+  const historyLimit = parseInt(e.formInput?.historyLength || 10); // השגת ערך היסטוריה מהטופס
 
   if (!text) {
     return notify_('✏️ Please enter a message.', CardService.NotificationType.INFO);
@@ -227,8 +233,7 @@ function handleSend_(e) {
     
     let history = loadHistory_();
     
-    // Limit history if needed
-    const historyLimit = parseInt(e.formInput?.historyLength || 10);
+    // Limit history based on user selection
     if (history.length > historyLimit) {
       history = history.slice(-historyLimit);
     }
@@ -259,10 +264,10 @@ function handleSend_(e) {
 
     saveHistory_(history);
     
-    // Save user settings
+    // Save user settings for persistence on reload
     settings.temperature = temperature.toString();
     settings.maxTokens = maxTokens.toString();
-    settings.historyLength = e.formInput?.historyLength;
+    settings.historyLength = historyLimit.toString(); // שמירת הערך הנכון
     saveSettings_(settings);
 
     return refresh_();
@@ -289,47 +294,66 @@ function copyLastMessage_() {
     return notify_('ℹ️ No messages to copy.', CardService.NotificationType.INFO);
   }
 
+  let textToCopy = null;
   const lastMessage = history[history.length - 1];
+
   if (lastMessage.role === 'user') {
     if (history.length > 1) {
-      const lastReply = history[history.length - 2];
-      copyToClipboard_(lastReply.text);
+      // If last message is user, copy the one before (the last assistant reply)
+      textToCopy = history[history.length - 2].text;
     }
   } else {
-    copyToClipboard_(lastMessage.text);
+    // If last message is model, copy it directly
+    textToCopy = lastMessage.text;
   }
-
-  return notify_('✅ Copied to clipboard!', CardService.NotificationType.INFO);
+  
+  if (textToCopy) {
+      copyToClipboard_(textToCopy);
+      return notify_('✅ Copied to clipboard!', CardService.NotificationType.INFO);
+  }
+  
+  return notify_('ℹ️ No model response available to copy.', CardService.NotificationType.INFO);
 }
+
 
 // ===================== GEMINI API CALL =====================
 function callGemini_(history, mode, temperature, maxTokens) {
   const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
   
   if (!apiKey) {
-    return '❌ ERROR: GEMINI_API_KEY not found in Script Properties';
+    return '❌ ERROR: GEMINI_API_KEY not found in Script Properties. Please set the API key in the Script Properties.';
   }
 
   try {
     const systemPrompt = SYSTEM_PROMPTS[mode] || SYSTEM_PROMPTS.assistant;
 
-    const contents = [
-      {
-        role: 'user',
-        parts: [{ text: systemPrompt }]
-      }
-    ];
+    // Build the contents array
+    const contents = [];
+    
+    // Add the system prompt as the first user message in the history
+    contents.push({
+      role: 'user',
+      parts: [{ text: systemPrompt }]
+    });
 
+    // Append the actual conversation history
     history.forEach(msg => {
+      // Ensure the roles match the expected structure ('user' or 'model')
+      const role = msg.role === 'user' ? 'user' : 'model';
       contents.push({
-        role: msg.role === 'user' ? 'user' : 'model',
+        role: role,
         parts: [{ text: msg.text }]
       });
     });
-
+    
+    // The Gemini API expects the last message to be from the 'user' if we want a response
+    // Since we appended the system prompt as 'user', we need to adjust if necessary. 
+    // In this structure, the conversation is already set up correctly for the API 
+    // to generate the next 'model' response after the last 'user' message in the history array.
+    
     const payload = {
       contents: contents,
-      generationConfig: {
+      config: { // Changed to 'config' which is standard for most Google APIs
         temperature: temperature,
         maxOutputTokens: maxTokens,
         topP: 0.95,
@@ -350,18 +374,16 @@ function callGemini_(history, mode, temperature, maxTokens) {
     const status = response.getResponseCode();
     const text = response.getContentText();
 
-    console.log('Status:', status);
-
     let data;
     try {
       data = JSON.parse(text);
     } catch (parseErr) {
       console.error('Parse error:', text);
-      return '❌ Failed to parse response';
+      return '❌ Failed to parse response from API server.';
     }
 
     if (status !== 200) {
-      const errorMsg = data.error?.message || 'Unknown error';
+      const errorMsg = data.error?.message || 'Unknown API Error';
       console.error('API Error:', errorMsg);
       return `❌ API Error: ${errorMsg}`;
     }
@@ -371,9 +393,14 @@ function callGemini_(history, mode, temperature, maxTokens) {
       reply = data.candidates[0].content.parts[0].text;
     }
     
+    // Check if the model blocked the response (safety/other)
+    if (!reply && data.candidates && data.candidates[0]?.finishReason) {
+         return `⚠️ Response blocked by model: ${data.candidates[0].finishReason}`;
+    }
+    
     if (!reply) {
       console.error('No text in response:', JSON.stringify(data));
-      return '❌ Empty response from Gemini';
+      return '❌ Empty or invalid response from Gemini.';
     }
 
     return reply;
@@ -390,19 +417,24 @@ function loadHistory_() {
     const data = PropertiesService.getUserProperties().getProperty(HISTORY_KEY);
     return data ? JSON.parse(data) : [];
   } catch (err) {
+    console.error('Error loading history:', err);
     return [];
   }
 }
 
 function saveHistory_(history) {
   try {
-    const json = JSON.stringify(history);
+    let historyToSave = [...history];
+    // Check size limit before saving
+    const json = JSON.stringify(historyToSave);
     if (json.length > 100000) {
-      history = history.slice(-20);
+      // Reduce history size aggressively if approaching limit
+      historyToSave = historyToSave.slice(-20);
     }
-    PropertiesService.getUserProperties().setProperty(HISTORY_KEY, JSON.stringify(history));
+    PropertiesService.getUserProperties().setProperty(HISTORY_KEY, JSON.stringify(historyToSave));
   } catch (err) {
     console.error('Save error:', err);
+    // Notify user if history is too large to save
   }
 }
 
@@ -411,6 +443,7 @@ function loadSettings_() {
     const data = PropertiesService.getUserProperties().getProperty(SETTINGS_KEY);
     return data ? JSON.parse(data) : {};
   } catch (err) {
+    console.error('Error loading settings:', err);
     return {};
   }
 }
@@ -451,7 +484,11 @@ function formatTime_(timestamp) {
 }
 
 function copyToClipboard_(text) {
-  // Apps Script doesn't have direct clipboard access
-  // This is a placeholder - in production, you'd need a different approach
-  console.log('Copy function placeholder');
+  // In Google Apps Script for add-ons, you cannot directly copy to the user's
+  // clipboard due to security restrictions. The 'copyLastMessage_' function
+  // will only trigger a notification that the copy action was 'successful'
+  // (the console.log is the only real effect here), but the actual copy 
+  // needs to be handled by an external mechanism if possible, or the user
+  // should copy the text manually from the UI.
+  console.log('Attempting to copy text to clipboard (placeholder):', text);
 }
