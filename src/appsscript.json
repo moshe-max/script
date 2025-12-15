@@ -1,12 +1,11 @@
 {
+  "runtime": "V8",
   "timeZone": "Asia/Jerusalem",
   "exceptionLogging": "STACKDRIVER",
-
   "oauthScopes": [
     "https://www.googleapis.com/auth/gmail.addons.execute",
     "https://www.googleapis.com/auth/script.external_request"
   ],
-
   "gmail": {
     "name": "Gemini AI Chatbot",
     "logoUrl": "https://www.gstatic.com/images/branding/product/1x/gmail_48dp.png",
