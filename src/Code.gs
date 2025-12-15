@@ -75,22 +75,36 @@ function buildChatSection_() {
   const history = loadHistory_();
 
   if (!history.length) {
-    section.addWidget(CardService.newTextParagraph().setText('👋 Select a mode and start chatting!'));
+    section.addWidget(
+      CardService.newTextParagraph().setText('👋 Select a mode and start chatting!')
+    );
     return section;
   }
 
+  // Split text into chunks for long messages
+  const CHUNK_SIZE = 500; // characters per widget
   history.slice(-8).forEach(msg => {
     const label = msg.role === 'user' ? '👤 You' : '🤖 Gemini';
-    const widget = CardService.newDecoratedText()
-      .setTopLabel(label)
-      .setText(truncateText_(msg.text, 250))
-      .setWrapText(true);
-    if (msg.role !== 'user') widget.setBottomLabel(formatTime_(msg.timestamp));
-    section.addWidget(widget);
+    const text = msg.text || '';
+    
+    for (let i = 0; i < text.length; i += CHUNK_SIZE) {
+      const chunk = text.substring(i, i + CHUNK_SIZE);
+      const widget = CardService.newDecoratedText()
+        .setTopLabel(label)
+        .setText(chunk)
+        .setWrapText(true);
+
+      if (msg.role !== 'user') {
+        widget.setBottomLabel(formatTime_(msg.timestamp));
+      }
+
+      section.addWidget(widget);
+    }
   });
 
   return section;
 }
+
 
 // ===================== INPUT SECTION =====================
 function buildInputSection_(settings) {
