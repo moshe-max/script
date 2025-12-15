@@ -6,7 +6,7 @@
 
 // ===================== CONSTANTS =====================
 
-const GEMINI_MODEL = 'gemini-1.5-pro-latest';
+const GEMINI_MODEL = 'models/gemini-1.5-flash';
 const MAX_HISTORY_MESSAGES = 40;
 
 const HISTORY_KEY = 'CHAT_HISTORY_V5';
