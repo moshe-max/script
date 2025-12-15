@@ -55,11 +55,10 @@ function buildModeSelector_(currentMode) {
   ];
 
   const buttons = modes.map(mode => {
-    // ✅ תיקון שגיאת שרשור: addParameter לפני setFunctionName
     const action = CardService.newAction()
-      .addParameter('mode', mode.id) 
-      .setFunctionName('setMode_');
-      
+      .setFunctionName('setMode_')
+      .setParameters({ mode: mode.id });
+    
     const btn = CardService.newTextButton()
       .setText(`${mode.icon} ${mode.label}`)
       .setOnClickAction(action);
@@ -96,7 +95,7 @@ function buildChatSection_() {
   // Show last 8 messages
   const recentHistory = history.slice(-8);
   
-  recentHistory.forEach((msg, idx) => {
+  recentHistory.forEach((msg) => {
     const isUser = msg.role === 'user';
     const label = isUser ? '👤 You' : '🤖 Gemini';
     const truncated = truncateText_(msg.text, 250);
@@ -128,7 +127,6 @@ function buildInputSection_(settings) {
       .setHint(`Message in ${settings.mode || 'assistant'} mode...`)
   );
 
-  // Temperature control section (using radio buttons)
   const currentTemp = settings.temperature || '0.7';
   
   section.addWidget(
@@ -230,13 +228,10 @@ function handleSend_(e) {
     const mode = settings.mode || 'assistant';
     
     let history = loadHistory_();
-    
-    // Limit history based on user selection
     if (history.length > historyLimit) {
       history = history.slice(-historyLimit);
     }
 
-    // Add user message
     history.push({ 
       role: 'user', 
       text: text,
@@ -244,10 +239,8 @@ function handleSend_(e) {
       mode: mode
     });
 
-    // Call Gemini with settings
     const reply = callGemini_(history, mode, temperature, maxTokens);
     
-    // Add assistant response
     history.push({ 
       role: 'model', 
       text: reply,
@@ -255,14 +248,12 @@ function handleSend_(e) {
       mode: mode
     });
 
-    // Trim if too large
     if (history.length > MAX_HISTORY) {
       history = history.slice(-MAX_HISTORY);
     }
 
     saveHistory_(history);
     
-    // Save user settings for persistence on reload
     settings.temperature = temperature.toString();
     settings.maxTokens = maxTokens.toString();
     settings.historyLength = historyLimit.toString();
@@ -313,7 +304,6 @@ function copyLastMessage_() {
   return notify_('ℹ️ No model response available to copy.', CardService.NotificationType.INFO);
 }
 
-
 // ===================== GEMINI API CALL =====================
 function callGemini_(history, mode, temperature, maxTokens) {
   const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
@@ -325,22 +315,12 @@ function callGemini_(history, mode, temperature, maxTokens) {
   try {
     const systemPrompt = SYSTEM_PROMPTS[mode] || SYSTEM_PROMPTS.assistant;
 
-    // Build the contents array
     const contents = [];
-    
-    // Add the system prompt as the first user message
-    contents.push({
-      role: 'user',
-      parts: [{ text: systemPrompt }]
-    });
+    contents.push({ role: 'user', parts: [{ text: systemPrompt }] });
 
-    // Append the actual conversation history
     history.forEach(msg => {
       const role = msg.role === 'user' ? 'user' : 'model';
-      contents.push({
-        role: role,
-        parts: [{ text: msg.text }]
-      });
+      contents.push({ role: role, parts: [{ text: msg.text }] });
     });
         
     const payload = {
@@ -367,38 +347,23 @@ function callGemini_(history, mode, temperature, maxTokens) {
     const text = response.getContentText();
 
     let data;
-    try {
-      data = JSON.parse(text);
-    } catch (parseErr) {
-      console.error('Parse error:', text);
-      return '❌ Failed to parse response from API server.';
-    }
+    try { data = JSON.parse(text); } 
+    catch { return '❌ Failed to parse response from API server.'; }
 
     if (status !== 200) {
       const errorMsg = data.error?.message || 'Unknown API Error';
-      console.error('API Error:', errorMsg);
       return `❌ API Error: ${errorMsg}`;
     }
 
-    let reply = null;
-    if (data.candidates && data.candidates[0]?.content?.parts?.[0]?.text) {
-      reply = data.candidates[0].content.parts[0].text;
-    }
-    
-    // Check if the model blocked the response (safety/other)
-    if (!reply && data.candidates && data.candidates[0]?.finishReason) {
-         return `⚠️ Response blocked by model: ${data.candidates[0].finishReason}`;
-    }
-    
-    if (!reply) {
-      console.error('No text in response:', JSON.stringify(data));
-      return '❌ Empty or invalid response from Gemini.';
+    let reply = data.candidates?.[0]?.content?.parts?.[0]?.text || null;
+    if (!reply && data.candidates?.[0]?.finishReason) {
+      return `⚠️ Response blocked by model: ${data.candidates[0].finishReason}`;
     }
 
+    if (!reply) return '❌ Empty or invalid response from Gemini.';
     return reply;
 
   } catch (err) {
-    console.error('Exception:', err.toString());
     return `❌ Error: ${err.toString()}`;
   }
 }
@@ -408,41 +373,28 @@ function loadHistory_() {
   try {
     const data = PropertiesService.getUserProperties().getProperty(HISTORY_KEY);
     return data ? JSON.parse(data) : [];
-  } catch (err) {
-    console.error('Error loading history:', err);
-    return [];
-  }
+  } catch (err) { return []; }
 }
 
 function saveHistory_(history) {
   try {
     let historyToSave = [...history];
-    const json = JSON.stringify(historyToSave);
-    if (json.length > 100000) {
+    if (JSON.stringify(historyToSave).length > 100000) {
       historyToSave = historyToSave.slice(-20);
     }
     PropertiesService.getUserProperties().setProperty(HISTORY_KEY, JSON.stringify(historyToSave));
-  } catch (err) {
-    console.error('Save error:', err);
-  }
+  } catch {}
 }
 
 function loadSettings_() {
   try {
     const data = PropertiesService.getUserProperties().getProperty(SETTINGS_KEY);
     return data ? JSON.parse(data) : {};
-  } catch (err) {
-    console.error('Error loading settings:', err);
-    return {};
-  }
+  } catch { return {}; }
 }
 
 function saveSettings_(settings) {
-  try {
-    PropertiesService.getUserProperties().setProperty(SETTINGS_KEY, JSON.stringify(settings));
-  } catch (err) {
-    console.error('Settings save error:', err);
-  }
+  try { PropertiesService.getUserProperties().setProperty(SETTINGS_KEY, JSON.stringify(settings)); } catch {}
 }
 
 // ===================== UI HELPERS =====================
@@ -460,8 +412,7 @@ function notify_(message, type = CardService.NotificationType.INFO) {
 }
 
 function truncateText_(text, maxLength) {
-  if (text.length <= maxLength) return text;
-  return text.substring(0, maxLength) + '...';
+  return text.length <= maxLength ? text : text.substring(0, maxLength) + '...';
 }
 
 function formatTime_(timestamp) {
@@ -473,6 +424,5 @@ function formatTime_(timestamp) {
 }
 
 function copyToClipboard_(text) {
-  // Console log placeholder since direct clipboard access is restricted
   console.log('Attempting to copy text to clipboard (placeholder - check console log for value):', text);
 }
