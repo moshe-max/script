@@ -1,233 +1,117 @@
 /**
- * Gemini AI Chat – Gmail Add-on
- * Private • Persistent • Gemini 1.5
- * FINAL FIXED VERSION
+ * Gemini AI Chat – Gmail Add-on (Private, Persistent)
+ * Uses Gemini 1.5 via generateContent (v1)
  */
 
-// ===================== CONSTANTS =====================
-
-const GEMINI_MODEL = 'models/gemini-1.5-flash';
-const MAX_HISTORY_MESSAGES = 40;
-
-const HISTORY_KEY = 'CHAT_HISTORY_V5';
-const META_KEY = 'CONVERSATION_META_V4';
-const PREFS_KEY = 'USER_PREFS_V4';
+/************ CONFIG ************/
+const GEMINI_MODEL = 'models/gemini-1.5-flash'; // ✅ VALID MODEL
 
 const TEMPERATURE_MODES = {
-  PRECISE: 0.2,
-  BALANCED: 0.6,
-  CREATIVE: 0.9
+  normal: 0.7,
+  precise: 0.3,
+  creative: 0.9
 };
 
 const SYSTEM_PROMPTS = {
-  GENERAL: 'You are a professional AI assistant. Be accurate, structured and concise.',
-  TECHNICAL: 'You are an expert engineer. Provide deep technical explanations with clean code examples.',
-  CREATIVE: 'You are a creative assistant. Be imaginative and helpful.',
-  RESEARCH: 'You are a research assistant. Be factual, cautious and acknowledge uncertainty.'
+  default: 'You are a helpful, professional AI assistant. Answer clearly and concisely.'
 };
 
-// ===================== ENTRY =====================
-
-function onGmailMessageOpen() {
-  initPrefs_();
-  return buildMainUI_();
+/************ ENTRY ************/
+function onHomepage(e) {
+  return buildUI_();
 }
 
-function initPrefs_() {
-  const p = PropertiesService.getUserProperties();
-  if (!p.getProperty(PREFS_KEY)) {
-    p.setProperty(PREFS_KEY, JSON.stringify({
-      conversationMode: 'GENERAL',
-      temperatureMode: 'BALANCED',
-      timestamps: true,
-      maxMessages: MAX_HISTORY_MESSAGES
-    }));
-  }
-}
-
-// ===================== UI =====================
-
-function buildMainUI_() {
+/************ UI ************/
+function buildUI_() {
   const header = CardService.newCardHeader()
     .setTitle('Gemini AI Chat')
     .setSubtitle('Private • Persistent • Gemini 1.5');
 
+  const input = CardService.newTextInput()
+    .setFieldName('prompt')
+    .setTitle('Message');
+
+  const btn = CardService.newTextButton()
+    .setText('Send')
+    .setOnClickAction(CardService.newAction().setFunctionName('onSend_'))
+    .setTextButtonStyle(CardService.TextButtonStyle.FILLED);
+
+  const section = CardService.newCardSection()
+    .addWidget(input)
+    .addWidget(btn);
+
   return CardService.newCardBuilder()
     .setHeader(header)
-    .addSection(buildStats_())
-    .addSection(buildHistory_())
-    .addSection(buildInput_())
-    .addSection(buildSettings_())
+    .addSection(section)
     .build();
 }
 
-function buildStats_() {
+/************ ACTION ************/
+function onSend_(e) {
+  const userText = e.formInput.prompt;
+  if (!userText) return buildUI_();
+
   const history = loadHistory_();
-  const meta = loadMeta_();
+  history.push({ role: 'user', text: userText });
 
-  const userCount = history.filter(m => m.role === 'user').length;
-
-  const section = CardService.newCardSection().setHeader('Conversation');
-  section.addWidget(CardService.newTextParagraph()
-    .setText(`Messages: ${history.length} (You: ${userCount})`));
-
-  if (meta.last) {
-    section.addWidget(CardService.newTextParagraph()
-      .setText(`Last activity: ${new Date(meta.last).toLocaleString()}`));
-  }
-
-  return section;
-}
-
-function buildHistory_() {
-  const prefs = loadPrefs_();
-  const history = loadHistory_().slice(-12);
-
-  const section = CardService.newCardSection()
-    .setHeader('Chat')
-    .setCollapsible(true);
-
-  if (!history.length) {
-    section.addWidget(CardService.newTextParagraph().setText('Start a new conversation.'));
-    return section;
-  }
-
-  history.forEach(m => {
-    const who = m.role === 'user' ? 'You' : 'Gemini';
-    const time = prefs.timestamps && m.ts
-      ? ` (${new Date(m.ts).toLocaleTimeString()})`
-      : '';
-
-    section.addWidget(CardService.newDecoratedText()
-      .setTopLabel(who + time)
-      .setText(format_(m.text))
-      .setWrapText(true));
-  });
-
-  return section;
-}
-
-function buildInput_() {
-  const section = CardService.newCardSection();
-
-  section.addWidget(CardService.newTextInput()
-    .setFieldName('prompt')
-    .setTitle('Message')
-    .setMultiline(true));
-
-  const send = CardService.newTextButton()
-    .setText('Send')
-    .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
-    .setOnClickAction(CardService.newAction().setFunctionName('send_'));
-
-  const clear = CardService.newTextButton()
-    .setText('New Chat')
-    .setOnClickAction(CardService.newAction().setFunctionName('clear_'));
-
-  section.addWidget(CardService.newButtonSet().addButton(send).addButton(clear));
-  return section;
-}
-
-function buildSettings_() {
-  const p = loadPrefs_();
-  const section = CardService.newCardSection().setHeader('Settings').setCollapsible(true);
-
-  section.addWidget(CardService.newSelectionInput()
-    .setType(CardService.SelectionInputType.DROPDOWN)
-    .setFieldName('conversationMode')
-    .setTitle('Mode')
-    .addItem('General', 'GENERAL', p.conversationMode === 'GENERAL')
-    .addItem('Technical', 'TECHNICAL', p.conversationMode === 'TECHNICAL')
-    .addItem('Creative', 'CREATIVE', p.conversationMode === 'CREATIVE')
-    .addItem('Research', 'RESEARCH', p.conversationMode === 'RESEARCH')
-    .setOnChangeAction(CardService.newAction().setFunctionName('savePrefs_')));
-
-  section.addWidget(CardService.newSelectionInput()
-    .setType(CardService.SelectionInputType.DROPDOWN)
-    .setFieldName('temperatureMode')
-    .setTitle('Style')
-    .addItem('Precise', 'PRECISE', p.temperatureMode === 'PRECISE')
-    .addItem('Balanced', 'BALANCED', p.temperatureMode === 'BALANCED')
-    .addItem('Creative', 'CREATIVE', p.temperatureMode === 'CREATIVE')
-    .setOnChangeAction(CardService.newAction().setFunctionName('savePrefs_')));
-
-  return section;
-}
-
-// ===================== ACTIONS =====================
-
-function send_(e) {
-  const text = (e.formInput?.prompt || '').trim();
-  if (!text) return notify_('Please enter a message.');
-
-  const prefs = loadPrefs_();
-  let history = loadHistory_();
-
-  history.push({ role: 'user', text: text, ts: Date.now() });
-  history = trimHistory_(history, prefs.maxMessages);
+  const reply = callGemini_(history);
+  history.push({ role: 'model', text: reply });
   saveHistory_(history);
 
-  const reply = callGemini_(history, prefs);
-
-  history.push({ role: 'model', text: reply, ts: Date.now() });
-  saveHistory_(trimHistory_(history, prefs.maxMessages));
-
-  saveMeta_({ last: Date.now() });
-  return refresh_();
+  return buildChatUI_(history);
 }
 
-function clear_() {
-  const p = PropertiesService.getUserProperties();
-  p.deleteProperty(HISTORY_KEY);
-  p.deleteProperty(META_KEY);
-  return notify_('New conversation started.');
-}
+/************ CHAT UI ************/
+function buildChatUI_(history) {
+  const header = CardService.newCardHeader()
+    .setTitle('Gemini AI Chat')
+    .setSubtitle('Private • Persistent • Gemini 1.5');
 
-function savePrefs_(e) {
-  const p = loadPrefs_();
-  if (e.formInput?.conversationMode) p.conversationMode = e.formInput.conversationMode;
-  if (e.formInput?.temperatureMode) p.temperatureMode = e.formInput.temperatureMode;
-  PropertiesService.getUserProperties().setProperty(PREFS_KEY, JSON.stringify(p));
-  return refresh_();
-}
+  const section = CardService.newCardSection();
 
-// ===================== GEMINI =====================
+  history.slice(-10).forEach(m => {
+    section.addWidget(
+      CardService.newTextParagraph()
+        .setText(`<b>${m.role === 'user' ? 'You' : 'Gemini'}:</b> ${m.text}`)
+    );
+  });
 
-function hasSystemPrompt_(history) {
-  return history.some(m =>
-    m.role === 'user' &&
-    Object.values(SYSTEM_PROMPTS).some(p => m.text.startsWith(p))
+  section.addWidget(
+    CardService.newTextButton()
+      .setText('New Message')
+      .setOnClickAction(CardService.newAction().setFunctionName('onHomepage'))
   );
+
+  return CardService.newCardBuilder()
+    .setHeader(header)
+    .addSection(section)
+    .build();
 }
 
-function callGemini_(history, prefs) {
+/************ GEMINI ************/
+function callGemini_(history) {
   const key = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
-  if (!key) return 'Error: GEMINI_API_KEY is not set.';
+  if (!key) return 'Error: GEMINI_API_KEY not set.';
 
-  const url = `https://generativelanguage.googleapis.com/v1/models/${GEMINI_MODEL}:generateContent?key=${key}`;
+  const url = `https://generativelanguage.googleapis.com/v1/${GEMINI_MODEL}:generateContent?key=${key}`;
 
   const contents = [];
 
-  if (!hasSystemPrompt_(history)) {
-    contents.push({
-      role: 'user',
-      parts: [{ text: SYSTEM_PROMPTS[prefs.conversationMode] }]
-    });
+  // Inject system prompt ONCE
+  if (!history.some(m => m.text.startsWith(SYSTEM_PROMPTS.default))) {
+    contents.push({ role: 'user', parts: [{ text: SYSTEM_PROMPTS.default }] });
   }
 
-  history.forEach(m => {
-    contents.push({
-      role: m.role === 'model' ? 'model' : 'user',
-      parts: [{ text: m.text }]
-    });
-  });
+  history.forEach(m => contents.push({
+    role: m.role === 'model' ? 'model' : 'user',
+    parts: [{ text: m.text }]
+  }));
 
   const payload = {
-    contents: contents,
+    contents,
     generationConfig: {
-      temperature: TEMPERATURE_MODES[prefs.temperatureMode],
-      maxOutputTokens: 2048,
-      topP: 0.95
+      temperature: TEMPERATURE_MODES.normal,
+      maxOutputTokens: 1024
     }
   };
 
@@ -243,61 +127,19 @@ function callGemini_(history, prefs) {
 
     if (json.error) return 'Gemini error: ' + json.error.message;
 
-    return json.candidates?.[0]?.content?.parts?.[0]?.text
-      || 'Gemini returned an empty response.';
+    return json.candidates?.[0]?.content?.parts?.[0]?.text || 'No response.';
 
-  } catch (e) {
+  } catch (err) {
     return 'Gemini request failed.';
   }
 }
 
-// ===================== STORAGE =====================
-
+/************ STORAGE ************/
 function loadHistory_() {
-  return JSON.parse(PropertiesService.getUserProperties().getProperty(HISTORY_KEY) || '[]');
+  const raw = PropertiesService.getUserProperties().getProperty('CHAT_HISTORY');
+  return raw ? JSON.parse(raw) : [];
 }
 
-function saveHistory_(h) {
-  PropertiesService.getUserProperties().setProperty(HISTORY_KEY, JSON.stringify(h));
-}
-
-function trimHistory_(h, max) {
-  return h.slice(-max);
-}
-
-function loadPrefs_() {
-  return JSON.parse(PropertiesService.getUserProperties().getProperty(PREFS_KEY));
-}
-
-function loadMeta_() {
-  return JSON.parse(PropertiesService.getUserProperties().getProperty(META_KEY) || '{}');
-}
-
-function saveMeta_(m) {
-  PropertiesService.getUserProperties().setProperty(META_KEY, JSON.stringify(m));
-}
-
-// ===================== UI HELPERS =====================
-
-function refresh_() {
-  return CardService.newActionResponseBuilder()
-    .setNavigation(CardService.newNavigation().updateCard(buildMainUI_()))
-    .build();
-}
-
-function notify_(msg) {
-  return CardService.newActionResponseBuilder()
-    .setNotification(CardService.newNotification().setText(msg))
-    .setNavigation(CardService.newNavigation().updateCard(buildMainUI_()))
-    .build();
-}
-
-function format_(t) {
-  return t.replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
-    .replace(/\*(.*?)\*/g, '<i>$1</i>')
-    .replace(/`(.*?)`/g, '<font face=\"monospace\">$1</font>')
-    .replace(/\n/g, '<br>');
+function saveHistory_(history) {
+  PropertiesService.getUserProperties().setProperty('CHAT_HISTORY', JSON.stringify(history));
 }
