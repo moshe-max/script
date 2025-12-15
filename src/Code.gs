@@ -55,8 +55,8 @@ function buildModeSelector_(currentMode) {
   ];
 
   const buttons = modes.map(mode => {
+    // ✅ תיקון שגיאת שרשור: addParameter לפני setFunctionName
     const action = CardService.newAction()
-      // ✅ תיקון שגיאת שרשור: addParameter לפני setFunctionName
       .addParameter('mode', mode.id) 
       .setFunctionName('setMode_');
       
@@ -204,7 +204,6 @@ function buildSettingsSection_(settings) {
 
 // ===================== EVENT HANDLERS =====================
 function setMode_(e) {
-  // e.parameters הוא הדרך הנכונה לקבל פרמטרים מ-CardService.newAction
   const mode = e.parameters.mode; 
   const settings = loadSettings_();
   settings.mode = mode;
@@ -213,11 +212,10 @@ function setMode_(e) {
 }
 
 function handleSend_(e) {
-  // e.formInput הוא הדרך הנכונה לקבל ערכים משדות קלט (TextInput, SelectionInput)
   const text = (e.formInput?.prompt || '').trim();
   const temperature = parseFloat(e.formInput?.temperature || 0.7);
   const maxTokens = parseInt(e.formInput?.maxTokens || 512);
-  const historyLimit = parseInt(e.formInput?.historyLength || 10); // השגת ערך היסטוריה מהטופס
+  const historyLimit = parseInt(e.formInput?.historyLength || 10); 
 
   if (!text) {
     return notify_('✏️ Please enter a message.', CardService.NotificationType.INFO);
@@ -267,7 +265,7 @@ function handleSend_(e) {
     // Save user settings for persistence on reload
     settings.temperature = temperature.toString();
     settings.maxTokens = maxTokens.toString();
-    settings.historyLength = historyLimit.toString(); // שמירת הערך הנכון
+    settings.historyLength = historyLimit.toString();
     saveSettings_(settings);
 
     return refresh_();
@@ -299,17 +297,17 @@ function copyLastMessage_() {
 
   if (lastMessage.role === 'user') {
     if (history.length > 1) {
-      // If last message is user, copy the one before (the last assistant reply)
       textToCopy = history[history.length - 2].text;
     }
   } else {
-    // If last message is model, copy it directly
     textToCopy = lastMessage.text;
   }
   
   if (textToCopy) {
       copyToClipboard_(textToCopy);
-      return notify_('✅ Copied to clipboard!', CardService.NotificationType.INFO);
+      return CardService.newActionResponseBuilder()
+         .setNotification(CardService.newNotification().setText('✅ Copied to clipboard (Check console log)!').setType(CardService.NotificationType.INFO))
+         .build();
   }
   
   return notify_('ℹ️ No model response available to copy.', CardService.NotificationType.INFO);
@@ -330,7 +328,7 @@ function callGemini_(history, mode, temperature, maxTokens) {
     // Build the contents array
     const contents = [];
     
-    // Add the system prompt as the first user message in the history
+    // Add the system prompt as the first user message
     contents.push({
       role: 'user',
       parts: [{ text: systemPrompt }]
@@ -338,22 +336,16 @@ function callGemini_(history, mode, temperature, maxTokens) {
 
     // Append the actual conversation history
     history.forEach(msg => {
-      // Ensure the roles match the expected structure ('user' or 'model')
       const role = msg.role === 'user' ? 'user' : 'model';
       contents.push({
         role: role,
         parts: [{ text: msg.text }]
       });
     });
-    
-    // The Gemini API expects the last message to be from the 'user' if we want a response
-    // Since we appended the system prompt as 'user', we need to adjust if necessary. 
-    // In this structure, the conversation is already set up correctly for the API 
-    // to generate the next 'model' response after the last 'user' message in the history array.
-    
+        
     const payload = {
       contents: contents,
-      config: { // Changed to 'config' which is standard for most Google APIs
+      config: { 
         temperature: temperature,
         maxOutputTokens: maxTokens,
         topP: 0.95,
@@ -425,16 +417,13 @@ function loadHistory_() {
 function saveHistory_(history) {
   try {
     let historyToSave = [...history];
-    // Check size limit before saving
     const json = JSON.stringify(historyToSave);
     if (json.length > 100000) {
-      // Reduce history size aggressively if approaching limit
       historyToSave = historyToSave.slice(-20);
     }
     PropertiesService.getUserProperties().setProperty(HISTORY_KEY, JSON.stringify(historyToSave));
   } catch (err) {
     console.error('Save error:', err);
-    // Notify user if history is too large to save
   }
 }
 
@@ -484,11 +473,6 @@ function formatTime_(timestamp) {
 }
 
 function copyToClipboard_(text) {
-  // In Google Apps Script for add-ons, you cannot directly copy to the user's
-  // clipboard due to security restrictions. The 'copyLastMessage_' function
-  // will only trigger a notification that the copy action was 'successful'
-  // (the console.log is the only real effect here), but the actual copy 
-  // needs to be handled by an external mechanism if possible, or the user
-  // should copy the text manually from the UI.
-  console.log('Attempting to copy text to clipboard (placeholder):', text);
+  // Console log placeholder since direct clipboard access is restricted
+  console.log('Attempting to copy text to clipboard (placeholder - check console log for value):', text);
 }
