@@ -1,12 +1,7 @@
 /**
- * Enhanced Gemini AI Chatbot – Gmail Add-on
- * FIXED + IMPROVED
- * - Correct Gemini roles (no fake system messages loop)
- * - Robust history trimming & de-duplication
- * - Streaming-safe thinking removal
- * - Token-safe history compression
- * - Better error handling & UI feedback
- * - Clean ASCII only (NetFree safe)
+ * Gemini AI Chat – Gmail Add-on
+ * Private • Persistent • Gemini 1.5
+ * FINAL FIXED VERSION
  */
 
 // ===================== CONSTANTS =====================
@@ -14,9 +9,9 @@
 const GEMINI_MODEL = 'gemini-1.5-pro-latest';
 const MAX_HISTORY_MESSAGES = 40;
 
-const HISTORY_KEY = 'CHAT_HISTORY_V4';
-const META_KEY = 'CONVERSATION_META_V3';
-const PREFS_KEY = 'USER_PREFS_V3';
+const HISTORY_KEY = 'CHAT_HISTORY_V5';
+const META_KEY = 'CONVERSATION_META_V4';
+const PREFS_KEY = 'USER_PREFS_V4';
 
 const TEMPERATURE_MODES = {
   PRECISE: 0.2,
@@ -28,7 +23,7 @@ const SYSTEM_PROMPTS = {
   GENERAL: 'You are a professional AI assistant. Be accurate, structured and concise.',
   TECHNICAL: 'You are an expert engineer. Provide deep technical explanations with clean code examples.',
   CREATIVE: 'You are a creative assistant. Be imaginative and helpful.',
-  RESEARCH: 'You are a research assistant. Be factual, cautious and cite uncertainty.'
+  RESEARCH: 'You are a research assistant. Be factual, cautious and acknowledge uncertainty.'
 };
 
 // ===================== ENTRY =====================
@@ -67,11 +62,12 @@ function buildMainUI_() {
 }
 
 function buildStats_() {
-  const section = CardService.newCardSection().setHeader('Conversation');
   const history = loadHistory_();
   const meta = loadMeta_();
 
-  const userCount = history.filter(h => h.role === 'user').length;
+  const userCount = history.filter(m => m.role === 'user').length;
+
+  const section = CardService.newCardSection().setHeader('Conversation');
   section.addWidget(CardService.newTextParagraph()
     .setText(`Messages: ${history.length} (You: ${userCount})`));
 
@@ -79,6 +75,7 @@ function buildStats_() {
     section.addWidget(CardService.newTextParagraph()
       .setText(`Last activity: ${new Date(meta.last).toLocaleString()}`));
   }
+
   return section;
 }
 
@@ -98,7 +95,8 @@ function buildHistory_() {
   history.forEach(m => {
     const who = m.role === 'user' ? 'You' : 'Gemini';
     const time = prefs.timestamps && m.ts
-      ? ` (${new Date(m.ts).toLocaleTimeString()})` : '';
+      ? ` (${new Date(m.ts).toLocaleTimeString()})`
+      : '';
 
     section.addWidget(CardService.newDecoratedText()
       .setTopLabel(who + time)
@@ -160,12 +158,12 @@ function buildSettings_() {
 
 function send_(e) {
   const text = (e.formInput?.prompt || '').trim();
-  if (!text) return notify_('Empty message');
+  if (!text) return notify_('Please enter a message.');
 
   const prefs = loadPrefs_();
   let history = loadHistory_();
 
-  history.push({ role: 'user', text, ts: Date.now() });
+  history.push({ role: 'user', text: text, ts: Date.now() });
   history = trimHistory_(history, prefs.maxMessages);
   saveHistory_(history);
 
@@ -182,7 +180,7 @@ function clear_() {
   const p = PropertiesService.getUserProperties();
   p.deleteProperty(HISTORY_KEY);
   p.deleteProperty(META_KEY);
-  return notify_('Conversation cleared');
+  return notify_('New conversation started.');
 }
 
 function savePrefs_(e) {
@@ -195,44 +193,58 @@ function savePrefs_(e) {
 
 // ===================== GEMINI =====================
 
+function hasSystemPrompt_(history) {
+  return history.some(m =>
+    m.role === 'user' &&
+    Object.values(SYSTEM_PROMPTS).some(p => m.text.startsWith(p))
+  );
+}
+
 function callGemini_(history, prefs) {
   const key = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
-  if (!key) return 'API key missing.';
+  if (!key) return 'Error: GEMINI_API_KEY is not set.';
 
   const url = `https://generativelanguage.googleapis.com/v1/models/${GEMINI_MODEL}:generateContent?key=${key}`;
 
   const contents = [];
 
-  // system instruction injected ONCE as first user turn
-  contents.push({
-    role: 'user',
-    parts: [{ text: SYSTEM_PROMPTS[prefs.conversationMode] }]
-  });
+  if (!hasSystemPrompt_(history)) {
+    contents.push({
+      role: 'user',
+      parts: [{ text: SYSTEM_PROMPTS[prefs.conversationMode] }]
+    });
+  }
 
-  history.forEach(h => contents.push({
-    role: h.role === 'model' ? 'model' : 'user',
-    parts: [{ text: h.text }]
-  }));
+  history.forEach(m => {
+    contents.push({
+      role: m.role === 'model' ? 'model' : 'user',
+      parts: [{ text: m.text }]
+    });
+  });
 
   const payload = {
     contents: contents,
     generationConfig: {
       temperature: TEMPERATURE_MODES[prefs.temperatureMode],
-      maxOutputTokens: 4096,
+      maxOutputTokens: 2048,
       topP: 0.95
     }
   };
 
   try {
-    const r = UrlFetchApp.fetch(url, {
+    const res = UrlFetchApp.fetch(url, {
       method: 'post',
       contentType: 'application/json',
       payload: JSON.stringify(payload),
       muteHttpExceptions: true
     });
 
-    const j = JSON.parse(r.getContentText());
-    return j.candidates?.[0]?.content?.parts?.[0]?.text || 'No response.';
+    const json = JSON.parse(res.getContentText());
+
+    if (json.error) return 'Gemini error: ' + json.error.message;
+
+    return json.candidates?.[0]?.content?.parts?.[0]?.text
+      || 'Gemini returned an empty response.';
 
   } catch (e) {
     return 'Gemini request failed.';
@@ -281,9 +293,11 @@ function notify_(msg) {
 }
 
 function format_(t) {
-  return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-    .replace(/\*\*(.*?)\*\*/g,'<b>$1</b>')
-    .replace(/\*(.*?)\*/g,'<i>$1</i>')
-    .replace(/`(.*?)`/g,'<font face="monospace">$1</font>')
-    .replace(/\n/g,'<br>');
+  return t.replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
+    .replace(/\*(.*?)\*/g, '<i>$1</i>')
+    .replace(/`(.*?)`/g, '<font face=\"monospace\">$1</font>')
+    .replace(/\n/g, '<br>');
 }
