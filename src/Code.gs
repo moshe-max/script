@@ -81,26 +81,44 @@ function buildChatSection_() {
     return section;
   }
 
-  // Split text into chunks for long messages
-  const CHUNK_SIZE = 500; // characters per widget
-  history.slice(-8).forEach(msg => {
-    const label = msg.role === 'user' ? '👤 You' : '🤖 Gemini';
-    const text = msg.text || '';
+  const CHUNK_SIZE = 800; // characters per widget
+  let lastRole = null;
+  let buffer = '';
+
+  history.forEach(msg => {
+    const role = msg.role === 'user' ? '👤 You' : '🤖 Gemini';
     
-    for (let i = 0; i < text.length; i += CHUNK_SIZE) {
-      const chunk = text.substring(i, i + CHUNK_SIZE);
-      const widget = CardService.newDecoratedText()
-        .setTopLabel(label)
-        .setText(chunk)
-        .setWrapText(true);
-
-      if (msg.role !== 'user') {
-        widget.setBottomLabel(formatTime_(msg.timestamp));
+    if (role === lastRole) {
+      // append to buffer if same role as previous message
+      buffer += '\n' + msg.text;
+    } else {
+      // flush previous buffer
+      if (buffer) {
+        for (let i = 0; i < buffer.length; i += CHUNK_SIZE) {
+          section.addWidget(
+            CardService.newDecoratedText()
+              .setTopLabel(lastRole)
+              .setText(buffer.substring(i, i + CHUNK_SIZE))
+              .setWrapText(true)
+          );
+        }
       }
-
-      section.addWidget(widget);
+      buffer = msg.text;
+      lastRole = role;
     }
   });
+
+  // flush remaining buffer
+  if (buffer) {
+    for (let i = 0; i < buffer.length; i += CHUNK_SIZE) {
+      section.addWidget(
+        CardService.newDecoratedText()
+          .setTopLabel(lastRole)
+          .setText(buffer.substring(i, i + CHUNK_SIZE))
+          .setWrapText(true)
+      );
+    }
+  }
 
   return section;
 }
