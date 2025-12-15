@@ -1,23 +1,15 @@
 /**
- * Gemini AI Chat – Premium Edition with Multi-Chat & Usage Limits
- * Multiple conversations, quota management, and analytics
+ * Gemini AI Chat – Premium Edition
+ * Enhanced UI, Better UX, Advanced Options
  */
 
 // ===================== CONSTANTS =====================
 const GEMINI_MODEL = 'gemini-2.5-flash';
 const MAX_HISTORY = 50;
-const CHATS_KEY = 'ALL_CHATS';
-const CURRENT_CHAT_KEY = 'CURRENT_CHAT_ID';
+const HISTORY_KEY = 'CHAT_HISTORY';
 const SETTINGS_KEY = 'CHAT_SETTINGS';
-const USAGE_KEY = 'USAGE_STATS';
 
-// Daily usage limits
-const DAILY_LIMITS = {
-  messages: 100,
-  tokens: 100000
-};
-
-// System prompts for different modes
+// Default system prompts for different modes
 const SYSTEM_PROMPTS = {
   assistant: 'You are a helpful, friendly AI assistant. Provide clear, concise, and accurate responses.',
   creative: 'You are a creative writing assistant. Be imaginative, engaging, and helpful. Write in an expressive style.',
@@ -34,14 +26,14 @@ function onGmailMessageOpen() {
 // ===================== MAIN UI =====================
 function buildMainUI_() {
   const settings = loadSettings_();
-  const currentChatId = getCurrentChatId_();
+  const section = CardService.newCardSection();
+
+  // Add tabs/mode selector
+  section.addWidget(buildModeSelector_(settings.mode || 'assistant'));
   
   return CardService.newCardBuilder()
     .setHeader(buildHeader_())
-    .addSection(buildUsageSection_())
-    .addSection(buildChatListSection_(currentChatId))
-    .addSection(buildModeSelector_(settings.mode || 'assistant'))
-    .addSection(buildChatSection_(currentChatId))
+    .addSection(buildChatSection_())
     .addSection(buildInputSection_(settings))
     .addSection(buildSettingsSection_(settings))
     .build();
@@ -49,103 +41,13 @@ function buildMainUI_() {
 
 function buildHeader_() {
   return CardService.newCardHeader()
-    .setTitle('💬 Gemini Multi-Chat')
-    .setSubtitle('Multiple conversations • Usage tracking • Smart limits');
-}
-
-// ===================== USAGE SECTION =====================
-function buildUsageSection_() {
-  const section = CardService.newCardSection().setHeader('📊 Daily Usage');
-  const usage = getUsageStats_();
-  
-  const messagesUsed = usage.messagesUsed || 0;
-  const tokensUsed = usage.tokensUsed || 0;
-  const messagePercent = Math.round((messagesUsed / DAILY_LIMITS.messages) * 100);
-  const tokenPercent = Math.round((tokensUsed / DAILY_LIMITS.tokens) * 100);
-
-  // Messages bar
-  let messageBar = '█'.repeat(Math.min(20, Math.ceil(messagePercent / 5))) + 
-                   '░'.repeat(20 - Math.ceil(messagePercent / 5));
-  section.addWidget(
-    CardService.newTextParagraph()
-      .setText(`💬 Messages: ${messagesUsed}/${DAILY_LIMITS.messages} (${messagePercent}%)\n${messageBar}`)
-  );
-
-  // Tokens bar
-  let tokenBar = '█'.repeat(Math.min(20, Math.ceil(tokenPercent / 5))) + 
-                 '░'.repeat(20 - Math.ceil(tokenPercent / 5));
-  section.addWidget(
-    CardService.newTextParagraph()
-      .setText(`🔤 Tokens: ${tokensUsed.toLocaleString()}/${DAILY_LIMITS.tokens.toLocaleString()} (${tokenPercent}%)\n${tokenBar}`)
-  );
-
-  // Status
-  let status = '✅ Normal';
-  if (messagePercent >= 90) status = '⚠️ Warning: Approaching message limit';
-  if (tokenPercent >= 90) status = '⚠️ Warning: Approaching token limit';
-  if (messagePercent >= 100 || tokenPercent >= 100) status = '❌ Daily limit reached! Reset tomorrow.';
-
-  section.addWidget(CardService.newTextParagraph().setText(status));
-
-  // Reset button
-  const resetBtn = CardService.newTextButton()
-    .setText('🔄 Manual Reset')
-    .setTextButtonStyle(CardService.TextButtonStyle.TEXT)
-    .setOnClickAction(CardService.newAction().setFunctionName('resetUsage_'));
-  
-  section.addWidget(CardService.newButtonSet().addButton(resetBtn));
-
-  return section;
-}
-
-// ===================== CHAT LIST SECTION =====================
-function buildChatListSection_(currentChatId) {
-  const section = CardService.newCardSection().setHeader('💾 Your Chats');
-  const allChats = getAllChats_();
-  
-  if (!allChats || Object.keys(allChats).length === 0) {
-    section.addWidget(
-      CardService.newTextParagraph()
-        .setText('No chats yet. Create a new one!')
-    );
-  } else {
-    // Show recent chats (max 5)
-    const chatIds = Object.keys(allChats).sort((a, b) => 
-      (allChats[b].lastActive || 0) - (allChats[a].lastActive || 0)
-    ).slice(0, 5);
-
-    const items = chatIds.map(chatId => {
-      const chat = allChats[chatId];
-      const msgCount = (chat.messages || []).length;
-      const preview = `${chat.name} (${msgCount})`;
-      return [preview, chatId];
-    });
-
-    section.addWidget(
-      CardService.newSelectionInput()
-        .setType(CardService.SelectionInputType.DROPDOWN)
-        .setFieldName('selectedChat')
-        .setTitle('Switch Chat')
-        .addItem('Create new chat', 'NEW', false)
-        .addItems(items)
-        .setOnChangeAction(CardService.newAction().setFunctionName('handleChatSwitch_'))
-    );
-  }
-
-  // New chat button
-  const newChatBtn = CardService.newTextButton()
-    .setText('➕ New Chat')
-    .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
-    .setOnClickAction(CardService.newAction().setFunctionName('createNewChat_'));
-  
-  section.addWidget(CardService.newButtonSet().addButton(newChatBtn));
-
-  return section;
+    .setTitle('💬 Gemini AI Chat')
+    .setSubtitle('Powered by Gemini 2.5 Flash | Smart • Fast • Flexible');
 }
 
 // ===================== MODE SELECTOR =====================
 function buildModeSelector_(currentMode) {
-  const section = CardService.newCardSection().setHeader('🎯 Mode');
+  const section = CardService.newCardSection().setHeader('Mode');
   
   const modes = [
     { id: 'assistant', icon: '🤖', label: 'Assistant' },
@@ -179,24 +81,23 @@ function buildModeSelector_(currentMode) {
   return section;
 }
 
-// ===================== CHAT SECTION =====================
-function buildChatSection_(chatId) {
-  const section = CardService.newCardSection().setHeader('💬 Messages');
-  const chat = getChat_(chatId);
-  const history = chat?.messages || [];
+// ===================== CHAT HISTORY SECTION =====================
+function buildChatSection_() {
+  const section = CardService.newCardSection().setHeader('💬 Conversation');
+  const history = loadHistory_();
 
-  if (!history.length) {
+  if (!history || history.length === 0) {
     section.addWidget(
       CardService.newTextParagraph()
-        .setText('👋 No messages yet. Send your first message!')
+        .setText('👋 Select a mode and start chatting! Each mode has a different personality.')
     );
     return section;
   }
 
-  // Show last 6 messages
-  const recent = history.slice(-6);
+  // Show last 8 messages
+  const recentHistory = history.slice(-8);
   
-  recent.forEach((msg, idx) => {
+  recentHistory.forEach((msg, idx) => {
     const isUser = msg.role === 'user';
     const label = isUser ? '👤 You' : '🤖 Gemini';
     const truncated = truncateText_(msg.text, 250);
@@ -223,9 +124,16 @@ function buildInputSection_(settings) {
   section.addWidget(
     CardService.newTextInput()
       .setFieldName('prompt')
-      .setTitle('Type your message')
+      .setTitle('Type here')
       .setMultiline(true)
-      .setHint(`Chatting in ${settings.mode || 'assistant'} mode...`)
+      .setHint(`Message in ${settings.mode || 'assistant'} mode...`)
+  );
+
+  // Temperature slider
+  section.addWidget(
+    CardService.newDecoratedText()
+      .setText('Creativity Level: ' + (settings.temperature || 0.7))
+      .setBottomLabel('Adjust model creativity (0=precise, 1=creative)')
   );
 
   section.addWidget(
@@ -238,17 +146,23 @@ function buildInputSection_(settings) {
       .addItem('✨ Creative (1.0)', '1.0', settings.temperature === '1.0')
   );
 
+  // Action buttons
   const sendBtn = CardService.newTextButton()
-    .setText('📤 Send')
+    .setText('📤 Send Message')
     .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
     .setOnClickAction(CardService.newAction().setFunctionName('handleSend_'));
 
-  const deleteBtn = CardService.newTextButton()
-    .setText('🗑️ Delete Chat')
+  const copyBtn = CardService.newTextButton()
+    .setText('📋 Copy Last')
     .setTextButtonStyle(CardService.TextButtonStyle.TEXT)
-    .setOnClickAction(CardService.newAction().setFunctionName('deleteCurrentChat_'));
+    .setOnClickAction(CardService.newAction().setFunctionName('copyLastMessage_'));
 
-  section.addWidget(CardService.newButtonSet().addButton(sendBtn).addButton(deleteBtn));
+  const clearBtn = CardService.newTextButton()
+    .setText('🗑️ Clear')
+    .setTextButtonStyle(CardService.TextButtonStyle.TEXT)
+    .setOnClickAction(CardService.newAction().setFunctionName('handleClear_'));
+
+  section.addWidget(CardService.newButtonSet().addButton(sendBtn).addButton(copyBtn).addButton(clearBtn));
 
   return section;
 }
@@ -262,85 +176,39 @@ function buildSettingsSection_(settings) {
       .setType(CardService.SelectionInputType.RADIO_BUTTON)
       .setFieldName('maxTokens')
       .setTitle('Response Length')
-      .addItem('📄 Short (256)', '256', settings.maxTokens === '256')
-      .addItem('📃 Medium (512)', '512', !settings.maxTokens || settings.maxTokens === '512')
-      .addItem('📕 Long (1024)', '1024', settings.maxTokens === '1024')
+      .addItem('📄 Short (256 tokens)', '256', settings.maxTokens === '256')
+      .addItem('📃 Medium (512 tokens)', '512', !settings.maxTokens || settings.maxTokens === '512')
+      .addItem('📕 Long (1024 tokens)', '1024', settings.maxTokens === '1024')
+  );
+
+  section.addWidget(
+    CardService.newSelectionInput()
+      .setType(CardService.SelectionInputType.RADIO_BUTTON)
+      .setFieldName('historyLength')
+      .setTitle('Context Window')
+      .addItem('🎯 Last 5 messages', '5', settings.historyLength === '5')
+      .addItem('⚖️ Last 10 messages', '10', !settings.historyLength || settings.historyLength === '10')
+      .addItem('🧠 Full history', '999', settings.historyLength === '999')
+  );
+
+  section.addWidget(
+    CardService.newTextParagraph()
+      .setText('💾 Total messages: ' + (loadHistory_().length || 0))
   );
 
   return section;
 }
 
 // ===================== EVENT HANDLERS =====================
-function createNewChat_() {
-  const chatId = generateId_();
-  const allChats = getAllChats_();
-  
-  allChats[chatId] = {
-    id: chatId,
-    name: `Chat ${Object.keys(allChats).length + 1}`,
-    messages: [],
-    created: new Date().toISOString(),
-    lastActive: new Date().toISOString(),
-    mode: 'assistant'
-  };
-
-  saveAllChats_(allChats);
-  setCurrentChatId_(chatId);
-  
-  return notify_('✅ New chat created!', CardService.NotificationType.INFO);
-}
-
-function deleteCurrentChat_() {
-  const chatId = getCurrentChatId_();
-  const allChats = getAllChats_();
-  
-  if (allChats[chatId]) {
-    delete allChats[chatId];
-    saveAllChats_(allChats);
-    
-    // Switch to another chat or create new one
-    const remaining = Object.keys(allChats);
-    if (remaining.length > 0) {
-      setCurrentChatId_(remaining[0]);
-    } else {
-      createNewChat_();
-    }
-  }
-  
-  return notify_('🗑️ Chat deleted', CardService.NotificationType.INFO);
-}
-
-function handleChatSwitch_(e) {
-  const chatId = e.formInput?.selectedChat;
-  
-  if (chatId === 'NEW') {
-    return createNewChat_();
-  }
-  
-  if (chatId) {
-    setCurrentChatId_(chatId);
-    const chat = getChat_(chatId);
-    return notify_(`📂 Switched to: ${chat.name}`, CardService.NotificationType.INFO);
-  }
-  
-  return refresh_();
-}
-
-function handleModeChange_(e) {
-  const mode = e.formInput?.mode;
-  if (!mode) return refresh_();
-  
+function setMode_(e) {
+  const mode = e.parameters.mode;
   const settings = loadSettings_();
   settings.mode = mode;
   saveSettings_(settings);
-  
-  const chatId = getCurrentChatId_();
-  const chat = getChat_(chatId);
-  chat.mode = mode;
-  updateChat_(chatId, chat);
-  
   return refresh_();
 }
+
+function handleSend_(e) {
   const text = (e.formInput?.prompt || '').trim();
   const temperature = parseFloat(e.formInput?.temperature || 0.7);
   const maxTokens = parseInt(e.formInput?.maxTokens || 512);
@@ -350,92 +218,119 @@ function handleModeChange_(e) {
   }
 
   if (text.length > 5000) {
-    return notify_('⚠️ Message too long (max 5000 chars)', CardService.NotificationType.WARNING);
-  }
-
-  // Check usage limits
-  const usage = getUsageStats_();
-  if (usage.messagesUsed >= DAILY_LIMITS.messages) {
-    return notify_('❌ Daily message limit reached!', CardService.NotificationType.ERROR);
-  }
-  if (usage.tokensUsed >= DAILY_LIMITS.tokens) {
-    return notify_('❌ Daily token limit reached!', CardService.NotificationType.ERROR);
+    return notify_('⚠️ Message too long. Keep it under 5000 characters.', CardService.NotificationType.WARNING);
   }
 
   try {
     const settings = loadSettings_();
-    const chatId = getCurrentChatId_();
-    const chat = getChat_(chatId);
-    const chatMode = mode || chat.mode || settings.mode || 'assistant';
+    const mode = settings.mode || 'assistant';
     
-    let history = chat.messages || [];
+    let history = loadHistory_();
+    
+    // Limit history if needed
+    const historyLimit = parseInt(e.formInput?.historyLength || 10);
+    if (history.length > historyLimit) {
+      history = history.slice(-historyLimit);
+    }
 
+    // Add user message
     history.push({ 
       role: 'user', 
       text: text,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      mode: mode
     });
 
-    // Call Gemini
-    const reply = callGemini_(history, chatMode, temperature, maxTokens);
+    // Call Gemini with settings
+    const reply = callGemini_(history, mode, temperature, maxTokens);
     
-    if (reply.startsWith('❌')) {
-      return notify_(reply, CardService.NotificationType.ERROR);
-    }
-
+    // Add assistant response
     history.push({ 
       role: 'model', 
       text: reply,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      mode: mode
     });
 
+    // Trim if too large
     if (history.length > MAX_HISTORY) {
       history = history.slice(-MAX_HISTORY);
     }
 
-    chat.messages = history;
-    chat.lastActive = new Date().toISOString();
-    updateChat_(chatId, chat);
-
-    const tokenEstimate = Math.ceil(text.length / 4) + Math.ceil(reply.length / 4);
-    updateUsage_(tokenEstimate);
+    saveHistory_(history);
+    
+    // Save user settings
+    settings.temperature = temperature.toString();
+    settings.maxTokens = maxTokens.toString();
+    settings.historyLength = e.formInput?.historyLength;
+    saveSettings_(settings);
 
     return refresh_();
 
   } catch (err) {
     console.error('Send error:', err);
-    return notify_('Error: ' + err.toString(), CardService.NotificationType.ERROR);
+    return notify_('❌ ' + err.toString(), CardService.NotificationType.ERROR);
   }
 }
 
-function resetUsage_() {
-  PropertiesService.getUserProperties().deleteProperty(USAGE_KEY);
-  return notify_('Usage stats reset!', CardService.NotificationType.INFO);
+function handleClear_() {
+  try {
+    PropertiesService.getUserProperties().deleteProperty(HISTORY_KEY);
+    return notify_('🗑️ Conversation cleared! Starting fresh.', CardService.NotificationType.INFO);
+  } catch (err) {
+    console.error('Clear error:', err);
+    return notify_('❌ Error clearing history.', CardService.NotificationType.ERROR);
+  }
 }
 
-// ===================== GEMINI API =====================
+function copyLastMessage_() {
+  const history = loadHistory_();
+  if (!history.length) {
+    return notify_('ℹ️ No messages to copy.', CardService.NotificationType.INFO);
+  }
+
+  const lastMessage = history[history.length - 1];
+  if (lastMessage.role === 'user') {
+    if (history.length > 1) {
+      const lastReply = history[history.length - 2];
+      copyToClipboard_(lastReply.text);
+    }
+  } else {
+    copyToClipboard_(lastMessage.text);
+  }
+
+  return notify_('✅ Copied to clipboard!', CardService.NotificationType.INFO);
+}
+
+// ===================== GEMINI API CALL =====================
 function callGemini_(history, mode, temperature, maxTokens) {
   const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
   
   if (!apiKey) {
-    return '❌ API key not configured';
+    return '❌ ERROR: GEMINI_API_KEY not found in Script Properties';
   }
 
   try {
     const systemPrompt = SYSTEM_PROMPTS[mode] || SYSTEM_PROMPTS.assistant;
-    const contents = [{ role: 'user', parts: [{ text: systemPrompt }] }];
+
+    const contents = [
+      {
+        role: 'user',
+        parts: [{ text: systemPrompt }]
+      }
+    ];
 
     history.forEach(msg => {
       contents.push({
-        role: msg.role,
+        role: msg.role === 'user' ? 'user' : 'model',
         parts: [{ text: msg.text }]
       });
     });
 
     const payload = {
-      contents,
+      contents: contents,
       generationConfig: {
-        temperature,
+        temperature: temperature,
         maxOutputTokens: maxTokens,
         topP: 0.95,
         topK: 64
@@ -455,118 +350,62 @@ function callGemini_(history, mode, temperature, maxTokens) {
     const status = response.getResponseCode();
     const text = response.getContentText();
 
-    let data = JSON.parse(text);
+    console.log('Status:', status);
 
-    if (status !== 200) {
-      return `❌ API Error: ${data.error?.message || 'Unknown'}`;
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (parseErr) {
+      console.error('Parse error:', text);
+      return '❌ Failed to parse response';
     }
 
-    const reply = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (status !== 200) {
+      const errorMsg = data.error?.message || 'Unknown error';
+      console.error('API Error:', errorMsg);
+      return `❌ API Error: ${errorMsg}`;
+    }
+
+    let reply = null;
+    if (data.candidates && data.candidates[0]?.content?.parts?.[0]?.text) {
+      reply = data.candidates[0].content.parts[0].text;
+    }
     
     if (!reply) {
+      console.error('No text in response:', JSON.stringify(data));
       return '❌ Empty response from Gemini';
     }
 
     return reply;
 
   } catch (err) {
-    console.error('API Error:', err);
-    return `❌ ${err.toString()}`;
+    console.error('Exception:', err.toString());
+    return `❌ Error: ${err.toString()}`;
   }
 }
 
-// ===================== CHAT STORAGE =====================
-function getAllChats_() {
+// ===================== STORAGE =====================
+function loadHistory_() {
   try {
-    const data = PropertiesService.getUserProperties().getProperty(CHATS_KEY);
-    return data ? JSON.parse(data) : {};
+    const data = PropertiesService.getUserProperties().getProperty(HISTORY_KEY);
+    return data ? JSON.parse(data) : [];
   } catch (err) {
-    return {};
+    return [];
   }
 }
 
-function saveAllChats_(chats) {
+function saveHistory_(history) {
   try {
-    PropertiesService.getUserProperties().setProperty(CHATS_KEY, JSON.stringify(chats));
+    const json = JSON.stringify(history);
+    if (json.length > 100000) {
+      history = history.slice(-20);
+    }
+    PropertiesService.getUserProperties().setProperty(HISTORY_KEY, JSON.stringify(history));
   } catch (err) {
     console.error('Save error:', err);
   }
 }
 
-function getChat_(chatId) {
-  const allChats = getAllChats_();
-  return allChats[chatId] || { id: chatId, name: 'Chat', messages: [], mode: 'assistant' };
-}
-
-function updateChat_(chatId, chat) {
-  const allChats = getAllChats_();
-  allChats[chatId] = chat;
-  saveAllChats_(allChats);
-}
-
-function getCurrentChatId_() {
-  let chatId = PropertiesService.getUserProperties().getProperty(CURRENT_CHAT_KEY);
-  
-  if (!chatId) {
-    const allChats = getAllChats_();
-    const chatIds = Object.keys(allChats);
-    
-    if (chatIds.length === 0) {
-      chatId = generateId_();
-      const newChat = {
-        id: chatId,
-        name: 'Chat 1',
-        messages: [],
-        created: new Date().toISOString(),
-        lastActive: new Date().toISOString(),
-        mode: 'assistant'
-      };
-      allChats[chatId] = newChat;
-      saveAllChats_(allChats);
-    } else {
-      chatId = chatIds[0];
-    }
-    
-    setCurrentChatId_(chatId);
-  }
-  
-  return chatId;
-}
-
-function setCurrentChatId_(chatId) {
-  PropertiesService.getUserProperties().setProperty(CURRENT_CHAT_KEY, chatId);
-}
-
-// ===================== USAGE TRACKING =====================
-function getUsageStats_() {
-  try {
-    const data = PropertiesService.getUserProperties().getProperty(USAGE_KEY);
-    if (!data) return { messagesUsed: 0, tokensUsed: 0, resetDate: new Date().toISOString() };
-    
-    const stats = JSON.parse(data);
-    const resetDate = new Date(stats.resetDate);
-    const now = new Date();
-    
-    // Reset if new day
-    if (resetDate.toDateString() !== now.toDateString()) {
-      return { messagesUsed: 0, tokensUsed: 0, resetDate: now.toISOString() };
-    }
-    
-    return stats;
-  } catch (err) {
-    return { messagesUsed: 0, tokensUsed: 0, resetDate: new Date().toISOString() };
-  }
-}
-
-function updateUsage_(tokensUsed) {
-  const usage = getUsageStats_();
-  usage.messagesUsed = (usage.messagesUsed || 0) + 1;
-  usage.tokensUsed = (usage.tokensUsed || 0) + tokensUsed;
-  
-  PropertiesService.getUserProperties().setProperty(USAGE_KEY, JSON.stringify(usage));
-}
-
-// ===================== SETTINGS =====================
 function loadSettings_() {
   try {
     const data = PropertiesService.getUserProperties().getProperty(SETTINGS_KEY);
@@ -584,7 +423,7 @@ function saveSettings_(settings) {
   }
 }
 
-// ===================== HELPERS =====================
+// ===================== UI HELPERS =====================
 function refresh_() {
   return CardService.newActionResponseBuilder()
     .setNavigation(CardService.newNavigation().updateCard(buildMainUI_()))
@@ -599,15 +438,20 @@ function notify_(message, type = CardService.NotificationType.INFO) {
 }
 
 function truncateText_(text, maxLength) {
-  return text.length <= maxLength ? text : text.substring(0, maxLength) + '...';
+  if (text.length <= maxLength) return text;
+  return text.substring(0, maxLength) + '...';
 }
 
 function formatTime_(timestamp) {
   if (!timestamp) return '';
   const date = new Date(timestamp);
-  return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
+  const hours = date.getHours().toString().padStart(2, '0');
+  const mins = date.getMinutes().toString().padStart(2, '0');
+  return `${hours}:${mins}`;
 }
 
-function generateId_() {
-  return 'chat_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+function copyToClipboard_(text) {
+  // Apps Script doesn't have direct clipboard access
+  // This is a placeholder - in production, you'd need a different approach
+  console.log('Copy function placeholder');
 }
