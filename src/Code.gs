@@ -1,24 +1,20 @@
 /**
  * Gemini AI Chatbot – Gmail Add-on
- * Model: gemini-2.5-flash
- * Private • Persistent • Gemini 2.5 Flash
+ * Model: Gemini 2.5 Flash
+ * Features:
+ * - Persistent conversation history
+ * - Private user storage
+ * - Error handling & debug logging
+ * - Supports multiple conversation modes and temperature
  */
-
-// ===================== CONSTANTS =====================
 
 const GEMINI_MODEL = 'models/gemini-2.5-flash';
 const MAX_HISTORY_MESSAGES = 40;
-
 const HISTORY_KEY = 'CHAT_HISTORY_V5';
 const META_KEY = 'CONVERSATION_META_V4';
 const PREFS_KEY = 'USER_PREFS_V4';
 
-const TEMPERATURE_MODES = {
-  PRECISE: 0.2,
-  BALANCED: 0.6,
-  CREATIVE: 0.9
-};
-
+const TEMPERATURE_MODES = { PRECISE: 0.2, BALANCED: 0.6, CREATIVE: 0.9 };
 const SYSTEM_PROMPTS = {
   GENERAL: 'You are a professional AI assistant. Be accurate, structured and concise.',
   TECHNICAL: 'You are an expert engineer. Provide deep technical explanations with clean code examples.',
@@ -26,8 +22,7 @@ const SYSTEM_PROMPTS = {
   RESEARCH: 'You are a research assistant. Be factual, cautious and cite uncertainty.'
 };
 
-// ===================== ENTRY =====================
-
+// ===================== ENTRY POINT =====================
 function onGmailMessageOpen() {
   initPrefs_();
   return buildMainUI_();
@@ -45,8 +40,7 @@ function initPrefs_() {
   }
 }
 
-// ===================== UI =====================
-
+// ===================== UI BUILDERS =====================
 function buildMainUI_() {
   const header = CardService.newCardHeader()
     .setTitle('Gemini AI Chat')
@@ -65,8 +59,8 @@ function buildStats_() {
   const section = CardService.newCardSection().setHeader('Conversation');
   const history = loadHistory_();
   const meta = loadMeta_();
-
   const userCount = history.filter(h => h.role === 'user').length;
+
   section.addWidget(CardService.newTextParagraph()
     .setText(`Messages: ${history.length} (You: ${userCount})`));
 
@@ -81,10 +75,7 @@ function buildHistory_() {
   const prefs = loadPrefs_();
   const history = loadHistory_().slice(-12);
 
-  const section = CardService.newCardSection()
-    .setHeader('Chat')
-    .setCollapsible(true);
-
+  const section = CardService.newCardSection().setHeader('Chat').setCollapsible(true);
   if (!history.length) {
     section.addWidget(CardService.newTextParagraph().setText('Start a new conversation.'));
     return section;
@@ -92,9 +83,7 @@ function buildHistory_() {
 
   history.forEach(m => {
     const who = m.role === 'user' ? 'You' : 'Gemini';
-    const time = prefs.timestamps && m.ts
-      ? ` (${new Date(m.ts).toLocaleTimeString()})` : '';
-
+    const time = prefs.timestamps && m.ts ? ` (${new Date(m.ts).toLocaleTimeString()})` : '';
     section.addWidget(CardService.newDecoratedText()
       .setTopLabel(who + time)
       .setText(format_(m.text))
@@ -106,7 +95,6 @@ function buildHistory_() {
 
 function buildInput_() {
   const section = CardService.newCardSection();
-
   section.addWidget(CardService.newTextInput()
     .setFieldName('prompt')
     .setTitle('Message')
@@ -152,7 +140,6 @@ function buildSettings_() {
 }
 
 // ===================== ACTIONS =====================
-
 function send_(e) {
   const text = (e.formInput?.prompt || '').trim();
   if (!text) return notify_('Empty message');
@@ -168,8 +155,8 @@ function send_(e) {
 
   history.push({ role: 'model', text: reply, ts: Date.now() });
   saveHistory_(trimHistory_(history, prefs.maxMessages));
-
   saveMeta_({ last: Date.now() });
+
   return refresh_();
 }
 
@@ -188,21 +175,15 @@ function savePrefs_(e) {
   return refresh_();
 }
 
-// ===================== GEMINI API =====================
-
+// ===================== GEMINI CALL =====================
 function callGemini_(history, prefs) {
   const key = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
   if (!key) return 'API key missing.';
 
   const url = `https://generativelanguage.googleapis.com/v1/models/${GEMINI_MODEL}:generateContent?key=${key}`;
-
   const contents = [];
 
-  // system instruction injected once
-  contents.push({
-    role: 'user',
-    parts: [{ text: SYSTEM_PROMPTS[prefs.conversationMode] }]
-  });
+  contents.push({ role: 'user', parts: [{ text: SYSTEM_PROMPTS[prefs.conversationMode] }] });
 
   history.forEach(h => contents.push({
     role: h.role === 'model' ? 'model' : 'user',
@@ -213,55 +194,40 @@ function callGemini_(history, prefs) {
     contents: contents,
     generationConfig: {
       temperature: TEMPERATURE_MODES[prefs.temperatureMode],
-      maxOutputTokens: 4096,
-      topP: 0.95
+      maxOutputTokens: 8192,
+      topP: 0.95,
+      topK: 64
     }
   };
 
   try {
-    const r = UrlFetchApp.fetch(url, {
+    console.log('Payload sent to Gemini:', JSON.stringify(payload));
+    const response = UrlFetchApp.fetch(url, {
       method: 'post',
       contentType: 'application/json',
       payload: JSON.stringify(payload),
       muteHttpExceptions: true
     });
 
-    const j = JSON.parse(r.getContentText());
-    return j.candidates?.[0]?.content?.parts?.[0]?.text || 'No response.';
-
-  } catch (e) {
-    return 'Gemini request failed.';
+    const data = JSON.parse(response.getContentText());
+    return data.candidates?.[0]?.content?.parts?.[0]?.text || 'Gemini returned no content.';
+  } catch (err) {
+    console.error('Gemini request failed:', err);
+    return 'Gemini request failed. Check logs.';
   }
 }
 
 // ===================== STORAGE =====================
-
 function loadHistory_() {
   return JSON.parse(PropertiesService.getUserProperties().getProperty(HISTORY_KEY) || '[]');
 }
-
-function saveHistory_(h) {
-  PropertiesService.getUserProperties().setProperty(HISTORY_KEY, JSON.stringify(h));
-}
-
-function trimHistory_(h, max) {
-  return h.slice(-max);
-}
-
-function loadPrefs_() {
-  return JSON.parse(PropertiesService.getUserProperties().getProperty(PREFS_KEY));
-}
-
-function loadMeta_() {
-  return JSON.parse(PropertiesService.getUserProperties().getProperty(META_KEY) || '{}');
-}
-
-function saveMeta_(m) {
-  PropertiesService.getUserProperties().setProperty(META_KEY, JSON.stringify(m));
-}
+function saveHistory_(h) { PropertiesService.getUserProperties().setProperty(HISTORY_KEY, JSON.stringify(h)); }
+function trimHistory_(h, max) { return h.slice(-max); }
+function loadPrefs_() { return JSON.parse(PropertiesService.getUserProperties().getProperty(PREFS_KEY)); }
+function loadMeta_() { return JSON.parse(PropertiesService.getUserProperties().getProperty(META_KEY) || '{}'); }
+function saveMeta_(m) { PropertiesService.getUserProperties().setProperty(META_KEY, JSON.stringify(m)); }
 
 // ===================== UI HELPERS =====================
-
 function refresh_() {
   return CardService.newActionResponseBuilder()
     .setNavigation(CardService.newNavigation().updateCard(buildMainUI_()))
