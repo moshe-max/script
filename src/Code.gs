@@ -114,23 +114,22 @@ function buildChatListSection_(currentChatId) {
       (allChats[b].lastActive || 0) - (allChats[a].lastActive || 0)
     ).slice(0, 5);
 
-    chatIds.forEach(chatId => {
+    const items = chatIds.map(chatId => {
       const chat = allChats[chatId];
-      const isActive = chatId === currentChatId;
-      const preview = chat.name || 'Untitled Chat';
       const msgCount = (chat.messages || []).length;
-      
-      const btn = CardService.newTextButton()
-        .setText(`${isActive ? '→' : '  '} ${preview} (${msgCount})`)
-        .setTextButtonStyle(isActive ? CardService.TextButtonStyle.FILLED : CardService.TextButtonStyle.TEXT)
-        .setOnClickAction(
-          CardService.newAction()
-            .setFunctionName('switchChat_')
-            .setParameters({chatId: chatId})
-        );
-      
-      section.addWidget(CardService.newButtonSet().addButton(btn));
+      const preview = `${chat.name} (${msgCount})`;
+      return [preview, chatId];
     });
+
+    section.addWidget(
+      CardService.newSelectionInput()
+        .setType(CardService.SelectionInputType.DROPDOWN)
+        .setFieldName('selectedChat')
+        .setTitle('Switch Chat')
+        .addItem('Create new chat', 'NEW', false)
+        .addItems(items)
+        .setOnChangeAction(CardService.newAction().setFunctionName('handleChatSwitch_'))
+    );
   }
 
   // New chat button
@@ -291,14 +290,6 @@ function createNewChat_() {
   return notify_('✅ New chat created!', CardService.NotificationType.INFO);
 }
 
-function switchChat_(e) {
-  const chatId = e.parameters.chatId;
-  setCurrentChatId_(chatId);
-  
-  const chat = getChat_(chatId);
-  return notify_(`📂 Switched to: ${chat.name}`, CardService.NotificationType.INFO);
-}
-
 function deleteCurrentChat_() {
   const chatId = getCurrentChatId_();
   const allChats = getAllChats_();
@@ -319,8 +310,10 @@ function deleteCurrentChat_() {
   return notify_('🗑️ Chat deleted', CardService.NotificationType.INFO);
 }
 
-function setMode_(e) {
-  const mode = e.parameters.mode;
+function handleModeChange_(e) {
+  const mode = e.formInput?.mode;
+  if (!mode) return refresh_();
+  
   const settings = loadSettings_();
   settings.mode = mode;
   saveSettings_(settings);
@@ -333,7 +326,21 @@ function setMode_(e) {
   return refresh_();
 }
 
-function handleSend_(e) {
+function handleChatSwitch_(e) {
+  const chatId = e.formInput?.selectedChat;
+  
+  if (chatId === 'NEW') {
+    return createNewChat_();
+  }
+  
+  if (chatId) {
+    setCurrentChatId_(chatId);
+    const chat = getChat_(chatId);
+    return notify_(`📂 Switched to: ${chat.name}`, CardService.NotificationType.INFO);
+  }
+  
+  return refresh_();
+}
   const text = (e.formInput?.prompt || '').trim();
   const temperature = parseFloat(e.formInput?.temperature || 0.7);
   const maxTokens = parseInt(e.formInput?.maxTokens || 512);
