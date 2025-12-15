@@ -1,6 +1,6 @@
 /**
  * Gemini AI Chat – Premium Edition
- * Gmail Add-on version fully fixed for Gemini v1beta
+ * Gmail Add-on fully fixed for Gemini v1beta
  */
 
 // ===================== CONSTANTS =====================
@@ -124,7 +124,6 @@ function buildInputSection_(settings) {
 // ===================== SETTINGS SECTION =====================
 function buildSettingsSection_(settings) {
   const section = CardService.newCardSection().setHeader('⚙️ Options');
-  const historyLen = settings.historyLength || '10';
   section.addWidget(CardService.newTextParagraph().setText('💾 Total messages: ' + (loadHistory_().length || 0)));
   return section;
 }
@@ -169,7 +168,7 @@ function copyLastMessage_() {
   return notify_('✅ Copied to clipboard (check console log)', CardService.NotificationType.INFO);
 }
 
-// ===================== GEMINI API CALL (FIXED v1beta) =====================
+// ===================== GEMINI API CALL (v1beta – content only) =====================
 function callGemini_(history, mode) {
   const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
   if (!apiKey) return '❌ GEMINI_API_KEY not set.';
@@ -178,22 +177,26 @@ function callGemini_(history, mode) {
   const contents = [{ text: systemPrompt }, ...history.map(m => ({ text: m.text }))];
 
   const payload = {
-    input: { structuredInput: { parts: contents.map(c => ({ text: c.text })) } }
+    content: contents.map(c => ({ text: c.text }))
   };
 
   try {
-    const response = UrlFetchApp.fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`, {
-      method: 'post',
-      contentType: 'application/json',
-      payload: JSON.stringify(payload),
-      muteHttpExceptions: true,
-      timeout: 60
-    });
+    const response = UrlFetchApp.fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
+      {
+        method: 'post',
+        contentType: 'application/json',
+        payload: JSON.stringify(payload),
+        muteHttpExceptions: true,
+        timeout: 60
+      }
+    );
 
     const status = response.getResponseCode();
     const data = JSON.parse(response.getContentText());
 
     if (status !== 200) return `❌ API Error: ${data.error?.message || 'Unknown error'}`;
+
     const reply = data.candidates?.[0]?.content?.[0]?.text || '❌ Empty response';
     return reply;
 
