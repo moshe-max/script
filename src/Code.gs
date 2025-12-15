@@ -7,7 +7,7 @@
 
 // ===================== CONFIG =====================
 
-const GEMINI_MODEL = 'gemini-1.5-flash';
+const GEMINI_MODEL = 'models/gemini-2.5-flash';
 const API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 const MAX_HISTORY = 40;
