@@ -75,21 +75,18 @@ function buildChatSection_() {
   const history = loadHistory_();
 
   if (!history.length) {
-    section.addWidget(
-      CardService.newTextParagraph().setText('👋 Select a mode and start chatting!')
-    );
+    section.addWidget(CardService.newTextParagraph().setText('👋 Select a mode and start chatting!'));
     return section;
   }
 
-  const CHUNK_SIZE = 800; // characters per widget
+  const CHUNK_SIZE = 500; // safe per-widget display limit
   let lastRole = null;
   let buffer = '';
 
   history.forEach(msg => {
-    const role = msg.role === 'user' ? '👤 You' : '🤖 Gemini';
-    
-    if (role === lastRole) {
-      // append to buffer if same role as previous message
+    const roleLabel = msg.role === 'user' ? '👤 You' : '🤖 Gemini';
+
+    if (lastRole === roleLabel) {
       buffer += '\n' + msg.text;
     } else {
       // flush previous buffer
@@ -104,7 +101,7 @@ function buildChatSection_() {
         }
       }
       buffer = msg.text;
-      lastRole = role;
+      lastRole = roleLabel;
     }
   });
 
@@ -122,6 +119,7 @@ function buildChatSection_() {
 
   return section;
 }
+
 
 
 // ===================== INPUT SECTION =====================
