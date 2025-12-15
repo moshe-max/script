@@ -1,6 +1,6 @@
 /**
  * Advanced Gemini AI Chatbot – Gmail Add-on
- * Fixed version – no async hacks, works reliably
+ * Fixed: Removed unsupported systemInstruction for gemini-1.5-pro-latest
  */
 
 const GEMINI_MODEL = 'gemini-1.5-pro-latest';
@@ -186,30 +186,25 @@ function sendToGemini_(e) {
   // Add user message
   history.push({ role: 'user', text: prompt, timestamp: new Date().toISOString() });
 
-  // Add temporary "thinking" message
+  // Add temporary thinking message
   history.push({ role: 'model', text: '*Thinking...*', timestamp: new Date().toISOString() });
 
-  // Trim if needed (temporary)
-  if (history.length > prefs.maxMessages) history = history.slice(-prefs.maxMessages);
+  props.setProperty(HISTORY_KEY, JSON.stringify(history.slice(-prefs.maxMessages)));
 
-  props.setProperty(HISTORY_KEY, JSON.stringify(history));
+  // Call Gemini with system prompt injected
+  const reply = callGeminiWithHistory_(history.slice(0, -1), prefs); // exclude thinking
 
-  // Call Gemini (this happens synchronously)
-  const reply = callGeminiWithHistory_(history.slice(0, -1), prefs); // without the thinking message
-
-  // Replace the last (thinking) message with real reply
+  // Replace thinking with real reply
   history.pop();
-  history.push({ role: 'model', text: reply || 'No response received.', timestamp: new Date().toISOString() });
+  history.push({ role: 'model', text: reply || 'No response.', timestamp: new Date().toISOString() });
 
   // Update metadata
   const metadata = JSON.parse(props.getProperty(CONVERSATION_METADATA_KEY) || '{}');
   metadata.lastInteraction = new Date().toISOString();
   props.setProperty(CONVERSATION_METADATA_KEY, JSON.stringify(metadata));
 
-  // Final save
   props.setProperty(HISTORY_KEY, JSON.stringify(history.slice(-prefs.maxMessages)));
 
-  // Refresh UI
   return CardService.newActionResponseBuilder()
     .setNavigation(CardService.newNavigation().updateCard(buildMainChatUI_()))
     .build();
@@ -249,16 +244,25 @@ function callGeminiWithHistory_(history, prefs) {
 
   const url = `https://generativelanguage.googleapis.com/v1/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
 
-  const contents = history.map(m => ({
+  // Inject system prompt as fake conversation start (only if history is short or empty)
+  let contents = history.map(m => ({
     role: m.role === 'model' ? 'model' : 'user',
     parts: [{ text: m.text }]
   }));
 
+  const systemPrompt = SYSTEM_PROMPTS[prefs.conversationMode] || SYSTEM_PROMPTS.GENERAL;
+
+  // Add system instruction only if it's not already there (avoid duplication)
+  if (history.length === 0 || !history[0].text.includes(systemPrompt)) {
+    contents.unshift(
+      { role: 'user', parts: [{ text: systemPrompt }] },
+      { role: 'model', parts: [{ text: 'Understood. I will follow these instructions.' }] }
+    );
+  }
+
   const temperature = TEMPERATURE_MODES[prefs.temperatureMode] || 0.6;
-  const systemInstruction = SYSTEM_PROMPTS[prefs.conversationMode] || SYSTEM_PROMPTS.GENERAL;
 
   const payload = {
-    systemInstruction: { parts: [{ text: systemInstruction }] },
     contents: contents,
     generationConfig: {
       temperature: temperature,
@@ -298,7 +302,7 @@ function callGeminiWithHistory_(history, prefs) {
     return 'No response from Gemini.';
 
   } catch (err) {
-    return 'Request failed. Check your API key or internet connection.';
+    return 'Request failed. Check connection or API key.';
   }
 }
 
