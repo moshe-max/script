@@ -280,3 +280,42 @@ function format_(t) {
     .replace(/`(.*?)`/g,'<font face="monospace">$1</font>')
     .replace(/\n/g,'<br>');
 }
+/*/to remove*/
+/**
+ * Test Gemini AI API connection
+ * Logs the raw response in Apps Script Execution Logs
+ */
+function testGeminiLogging() {
+  const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
+  if (!apiKey) {
+    Logger.log('GEMINI_API_KEY not set in Script Properties!');
+    return;
+  }
+
+  const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=' + apiKey;
+
+  const payload = {
+    contents: [
+      { role: 'user', parts: [{ text: 'Hello, Gemini! Please respond briefly.' }] }
+    ],
+    generationConfig: {
+      temperature: 0.6,
+      maxOutputTokens: 200
+    }
+  };
+
+  try {
+    const response = UrlFetchApp.fetch(url, {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+
+    Logger.log('HTTP Response Code: ' + response.getResponseCode());
+    Logger.log('Raw Response: ' + response.getContentText());
+    
+  } catch (err) {
+    Logger.log('Request failed: ' + err);
+  }
+}
