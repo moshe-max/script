@@ -366,7 +366,7 @@ function handleChatSwitch_(e) {
     const settings = loadSettings_();
     const chatId = getCurrentChatId_();
     const chat = getChat_(chatId);
-    const mode = chat.mode || settings.mode || 'assistant';
+    const chatMode = mode || chat.mode || settings.mode || 'assistant';
     
     let history = chat.messages || [];
 
@@ -377,7 +377,7 @@ function handleChatSwitch_(e) {
     });
 
     // Call Gemini
-    const reply = callGemini_(history, mode, temperature, maxTokens);
+    const reply = callGemini_(history, chatMode, temperature, maxTokens);
     
     if (reply.startsWith('❌')) {
       return notify_(reply, CardService.NotificationType.ERROR);
