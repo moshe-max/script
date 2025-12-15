@@ -171,22 +171,14 @@ function callGemini_(history) {
   }
 
   try {
-    // Build contents array with system prompt
-    const contents = [];
-    
-    // Add conversation history
-    history.forEach(msg => {
-      contents.push({
-        role: msg.role === 'user' ? 'user' : 'model',
-        parts: [{ text: msg.text }]
-      });
-    });
+    // Build contents array - only include actual conversation, not system prompt
+    const contents = history.map(msg => ({
+      role: msg.role === 'user' ? 'user' : 'model',
+      parts: [{ text: msg.text }]
+    }));
 
     const payload = {
       contents: contents,
-      systemInstruction: {
-        parts: [{ text: SYSTEM_PROMPT }]
-      },
       generationConfig: {
         temperature: 0.7,
         maxOutputTokens: 1024,
@@ -203,10 +195,14 @@ function callGemini_(history) {
       timeout: 60
     };
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
     const response = UrlFetchApp.fetch(url, options);
     const status = response.getResponseCode();
     const text = response.getContentText();
+
+    // Log for debugging
+    console.log('Status:', status);
+    console.log('Response:', text.substring(0, 500));
 
     // Parse response
     let data;
@@ -214,29 +210,36 @@ function callGemini_(history) {
       data = JSON.parse(text);
     } catch (parseErr) {
       console.error('JSON parse error:', text);
-      return '❌ Failed to parse Gemini response. Please try again.';
+      return '❌ Failed to parse response. Check logs and API key.';
     }
 
     // Handle API errors
     if (status !== 200) {
       const errorMsg = data.error?.message || 'Unknown API error';
       console.error(`Gemini API error (${status}):`, errorMsg);
-      return `❌ API Error: ${errorMsg}`;
+      return `❌ API Error (${status}): ${errorMsg}`;
     }
 
-    // Extract response text
-    const reply = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    // Extract response text - handle both response formats
+    let reply = null;
+    
+    if (data.candidates && data.candidates.length > 0) {
+      const candidate = data.candidates[0];
+      if (candidate.content && candidate.content.parts && candidate.content.parts.length > 0) {
+        reply = candidate.content.parts[0].text;
+      }
+    }
     
     if (!reply) {
-      console.error('No text in response:', JSON.stringify(data));
+      console.error('No text in response. Full response:', JSON.stringify(data));
       return '❌ Gemini returned an empty response. Try again.';
     }
 
     return reply;
 
   } catch (err) {
-    console.error('Gemini request exception:', err);
-    return `❌ Error communicating with Gemini: ${err.toString()}`;
+    console.error('Gemini request exception:', err.toString());
+    return `❌ Error: ${err.toString()}`;
   }
 }
 
