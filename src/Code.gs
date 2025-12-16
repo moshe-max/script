@@ -404,7 +404,8 @@ function handleSearchQuery(message, thread, originalBody, sender) {
 
   log(`Smart search → extracted query: "${query}"`);
 
-  const searchUrl = `${C.YOUTUBE_API_BASE}/search?part=snippet&maxResults=${maxResults}&q=${encodeURIComponent(query)}&type=video&key=${C.YOUTUBE_API_KEY}`;
+  // Add language restriction to prefer English results
+  const searchUrl = `${C.YOUTUBE_API_BASE}/search?part=snippet&maxResults=${maxResults}&q=${encodeURIComponent(query)}&type=video&relevanceLanguage=en&key=${C.YOUTUBE_API_KEY}`;
 
   try {
     const searchResponse = UrlFetchApp.fetch(searchUrl);
