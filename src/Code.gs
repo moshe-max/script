@@ -1389,53 +1389,77 @@ function sendHelpCard(message, userRole, roleLimits) {
 // 9. TESTING & DIAGNOSTIC FUNCTION
 // ====================================================================
 
-function testEndpointQualities() {
+function testVideoQualityDelivery() {
   const C = getConstants();
   
+  // Test video URL (short YouTube video)
+  const testUrl = "https://www.youtube.com/watch?v=jNQXAC9IVRw";
+  
   Logger.log("\n" + "=".repeat(70));
-  Logger.log("TESTING ENDPOINT AVAILABLE QUALITIES");
+  Logger.log("VIDEO QUALITY DELIVERY TEST");
   Logger.log("=".repeat(70) + "\n");
   
-  try {
-    const response = UrlFetchApp.fetch(C.RAILWAY_ENDPOINT + "/quality-info", {
-      muteHttpExceptions: true
-    });
+  Logger.log(`Test URL: ${testUrl}`);
+  Logger.log(`Endpoint: ${C.RAILWAY_ENDPOINT}\n`);
+  
+  const rolesToTest = ['admin', 'pro_plus', 'user', 'guest'];
+  
+  for (const role of rolesToTest) {
+    Logger.log("-".repeat(70));
+    Logger.log(`Testing Role: ${role.toUpperCase()}`);
+    Logger.log("-".repeat(70));
     
-    if (response.getResponseCode() === 200) {
-      const data = JSON.parse(response.getContentText());
+    try {
+      const downloadUrl = `${C.RAILWAY_ENDPOINT}/download?url=${encodeURIComponent(testUrl)}&quality=${role}`;
       
-      Logger.log("✓ ENDPOINT CONNECTED SUCCESSFULLY\n");
-      Logger.log(`Service: ${data.service || "N/A"}`);
-      Logger.log(`Version: ${data.version || "N/A"}`);
-      Logger.log(`Default Quality: ${data.default_quality || "N/A"}\n`);
+      const response = UrlFetchApp.fetch(downloadUrl, {
+        muteHttpExceptions: true,
+        followRedirects: false
+      });
       
-      Logger.log("Available Qualities:");
-      Logger.log("-".repeat(70));
+      const responseCode = response.getResponseCode();
       
-      for (const [role, info] of Object.entries(data.available_qualities || {})) {
-        const status = info.enabled ? "✓ ENABLED" : "✗ DISABLED";
-        Logger.log(`${role.padEnd(20)} | ${info.label.padEnd(15)} | ${status.padEnd(12)} | Max: ${info.max_filesize_mb} MB`);
+      Logger.log(`Response Code: ${responseCode}`);
+      
+      if (responseCode === 200) {
+        // Get headers
+        const headers = response.getAllHeaders();
+        const videoQuality = headers['x-video-quality'] || "Not specified";
+        const userRole = headers['x-user-role'] || "Not specified";
+        const contentLength = headers['content-length'] || "Unknown";
+        const contentType = headers['content-type'] || "Unknown";
+        
+        Logger.log(`✓ SUCCESS - Video downloaded`);
+        Logger.log(`  Quality Header: ${videoQuality}`);
+        Logger.log(`  User Role Header: ${userRole}`);
+        Logger.log(`  Content Type: ${contentType}`);
+        Logger.log(`  File Size: ${(contentLength / (1024 * 1024)).toFixed(2)} MB`);
+        
+        // Check if quality matches what was expected
+        const expectedQuality = C.ROLE_LIMITS[role]?.quality || "Unknown";
+        if (videoQuality === expectedQuality) {
+          Logger.log(`  ✓ Quality matches expected: ${expectedQuality}`);
+        } else {
+          Logger.log(`  ⚠ Quality mismatch! Expected: ${expectedQuality}, Got: ${videoQuality}`);
+        }
+        
+      } else if (responseCode === 403) {
+        Logger.log(`✗ ACCESS DENIED - This role cannot download`);
+      } else {
+        Logger.log(`✗ ERROR - Status ${responseCode}`);
+        Logger.log(`  Response: ${response.getContentText().substring(0, 200)}`);
       }
       
-      Logger.log("\n" + "=".repeat(70));
-      Logger.log("SUMMARY");
-      Logger.log("=".repeat(70));
-      const totalRoles = Object.keys(data.available_qualities || {}).length;
-      const enabledRoles = Object.values(data.available_qualities || {}).filter(r => r.enabled).length;
-      Logger.log(`Total Roles: ${totalRoles}`);
-      Logger.log(`Enabled: ${enabledRoles}`);
-      Logger.log(`Disabled: ${totalRoles - enabledRoles}`);
-      Logger.log(`Backward Compatible: ${data.backward_compatible ? "Yes" : "No"}`);
-      Logger.log("\n");
-      
-    } else {
-      Logger.log(`✗ ENDPOINT ERROR: Status ${response.getResponseCode()}`);
-      Logger.log(`Response: ${response.getContentText()}`);
+    } catch (e) {
+      Logger.log(`✗ EXCEPTION: ${e.toString()}`);
     }
-  } catch (e) {
-    Logger.log(`✗ CONNECTION FAILED: ${e.toString()}`);
-    Logger.log(`Check endpoint URL: ${C.RAILWAY_ENDPOINT}`);
+    
+    Logger.log("");
   }
+  
+  Logger.log("=".repeat(70));
+  Logger.log("TEST COMPLETE");
+  Logger.log("=".repeat(70) + "\n");
 }
 
-// Run this function from Apps Script console to test: testEndpointQualities()
+// Run this function from Apps Script console to test: testVideoQualityDelivery()
