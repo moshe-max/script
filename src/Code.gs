@@ -1,45 +1,51 @@
 /**
  * Google Apps Script for a YouTube Downloader/Search Bot via Gmail.
- *
- * This script processes unread emails with the subject "bt".
- * 1. If the email body contains YouTube links, it downloads the videos,
- *    uploads them to Google Drive, and replies with shareable links.
- * 2. If no links are found, it performs a YouTube search and replies with interactive results.
- *
- * FEATURES:
- * - Implements role-based usage limits (admin, pro user, user, guest).
- * - Reads user roles from the "User Roles" sheet.
- * - Saves videos to Google Drive instead of email attachments
+ * ENHANCED VERSION: Comprehensive detailed logging to Google Sheets
  */
 
 // ====================================================================
 // 1. CONSTANTS & CONFIGURATION
 // ====================================================================
 
-/**
- * Retrieves configuration values and role-based limits.
- */
 function getConstants() {
   const YOUTUBE_API_KEY = PropertiesService.getScriptProperties().getProperty('YOUTUBE_API_KEY');
 
   return {
     RAILWAY_ENDPOINT: "https://yt-mail.onrender.com",
     YOUTUBE_API_BASE: "https://www.googleapis.com/youtube/v3",
-    LOG_SPREADSHEET_ID: "1vxiRaNLMW5mtlrneiRBnzx0PKgvKJAmGqVnALKH6vFA",
-    DRIVE_FOLDER_NAME: "YouTube Bot Downloads", // Folder name in Google Drive
-    MAX_VIDEO_SIZE_MB: 100, // Max size for Drive uploads
-    EMAIL_ATTACHMENT_SIZE_MB: 24, // If video is under this, send as email attachment instead
+    LOG_SPREADSHEET_ID: "1Potx9BeXT-USmEKeBR4ouw7r1JY6MgCmSLYctqfdaXI",
+    DRIVE_FOLDER_NAME: "YouTube Bot Downloads",
+    MAX_VIDEO_SIZE_MB: 100,
+    EMAIL_ATTACHMENT_SIZE_MB: 24,
 
-    // USAGE LIMITS (Role-based)
     ROLE_LIMITS: {
-      'admin': { downloads: Infinity, searches: Infinity, maxResults: 15, label: 'Admin', quality: '720p' }, 
+      // Premium Tier
+      'admin': { downloads: Infinity, searches: Infinity, maxResults: 15, label: 'Admin', quality: '720p' },
+      'enterprise': { downloads: Infinity, searches: Infinity, maxResults: 15, label: 'Enterprise User', quality: '720p' },
+      
+      // Pro Tier
       'pro plus': { downloads: 25, searches: 25, maxResults: 15, label: 'Pro Plus User', quality: '720p' },
+      'pro_plus': { downloads: 25, searches: 25, maxResults: 15, label: 'Pro Plus User', quality: '720p' },
       'pro user': { downloads: 12, searches: 12, maxResults: 12, label: 'Pro User', quality: '480p' },
+      'pro_user': { downloads: 12, searches: 12, maxResults: 12, label: 'Pro User', quality: '480p' },
+      'premium': { downloads: 15, searches: 15, maxResults: 12, label: 'Premium User', quality: '480p' },
+      
+      // Standard Tier
       'user': { downloads: 5, searches: 5, maxResults: 5, label: 'Standard User', quality: '360p' },
-      'guest': { downloads: 1, searches: 5, maxResults: 5, label: 'Guest', quality: '240p' }
+      'standard': { downloads: 5, searches: 5, maxResults: 5, label: 'Standard Member', quality: '360p' },
+      
+      // Free/Guest Tier
+      'guest': { downloads: 1, searches: 5, maxResults: 5, label: 'Guest User', quality: '240p' },
+      'free': { downloads: 2, searches: 5, maxResults: 5, label: 'Free User', quality: '240p' },
+      
+      // Restricted/Denied Tiers
+      'denied': { downloads: 0, searches: 0, maxResults: 0, label: 'Access Denied', quality: 'DENIED' },
+      'suspended': { downloads: 0, searches: 0, maxResults: 0, label: 'Account Suspended', quality: 'SUSPENDED' },
+      'banned': { downloads: 0, searches: 0, maxResults: 0, label: 'Account Banned', quality: 'BANNED' },
+      'closed': { downloads: 0, searches: 0, maxResults: 0, label: 'Account Closed', quality: 'CLOSED' }
     },
     DEFAULT_ROLE: 'guest',
-    USAGE_WINDOW_MINUTES: 1440, // 24 hours
+    USAGE_WINDOW_MINUTES: 1440,
     USAGE_SHEET_NAME: "Usage & Limits",
     ROLES_SHEET_NAME: "User Roles",
     
@@ -49,14 +55,28 @@ function getConstants() {
 }
 
 // ====================================================================
-// 2. MAIN EXECUTION FUNCTION (Trigger this function)
+// 2. MAIN EXECUTION FUNCTION
 // ====================================================================
 
 function processYouTubeEmails() {
+  const startTime = new Date();
+  logDetailedToSheet({
+    eventType: "BOT_START",
+    timestamp: startTime,
+    details: "Bot execution started"
+  });
+
   Logger.log("=== Bot started ===");
 
   const threads = GmailApp.search('is:unread subject:bt');
   Logger.log(`Found ${threads.length} unread thread(s) with "bt" in subject`);
+
+  logDetailedToSheet({
+    eventType: "THREADS_FOUND",
+    timestamp: new Date(),
+    threadCount: threads.length,
+    details: `Found ${threads.length} unread threads with subject "bt"`
+  });
 
   for (const thread of threads) {
     const messages = thread.getMessages();
@@ -66,64 +86,207 @@ function processYouTubeEmails() {
 
     const sender = message.getFrom();
     const subject = message.getSubject();
-    
     const bodyPlain = message.getPlainBody().trim();
     const bodyHtml = message.getBody(); 
     const combinedBody = bodyPlain + "\n\n" + bodyHtml;
 
     Logger.log(`Processing → From: ${sender} | Subject: ${subject}`);
     
-    const youtubeRegex = /(https?:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)[A-Za-z0-9_-]{11}[^\s<>"'\]]*)/g;
+    logDetailedToSheet({
+      eventType: "EMAIL_RECEIVED",
+      timestamp: new Date(),
+      sender: sender,
+      subject: subject,
+      bodyLength: bodyPlain.length,
+      details: `Email received from ${sender}`
+    });
     
+    const youtubeRegex = /(https?:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)[A-Za-z0-9_-]{11}[^\s<>"'\]]*)/g;
     const links = [...new Set((combinedBody.match(youtubeRegex) || []))];
 
     Logger.log(`[DEBUG] Extracted Links Count: ${links.length}`);
+    
     if (links.length > 0) {
       Logger.log(`[DEBUG] Links found: ${links.join(' | ')}`);
+      logDetailedToSheet({
+        eventType: "LINKS_DETECTED",
+        timestamp: new Date(),
+        sender: sender,
+        linkCount: links.length,
+        links: links.join(" | "),
+        details: `${links.length} YouTube link(s) detected in email`
+      });
       handleDirectLinks(message, thread, links, sender);
     } else {
       Logger.log(`[DEBUG] No links found. Using Plain Body as Search Query: "${bodyPlain}"`);
+      logDetailedToSheet({
+        eventType: "SEARCH_QUERY_DETECTED",
+        timestamp: new Date(),
+        sender: sender,
+        query: bodyPlain.substring(0, 100),
+        details: `No links detected. Treating email body as search query`
+      });
       handleSearchQuery(message, thread, bodyPlain, sender);
     }
 
     thread.markRead();
+    
+    logDetailedToSheet({
+      eventType: "EMAIL_MARKED_READ",
+      timestamp: new Date(),
+      sender: sender,
+      details: `Thread marked as read`
+    });
   }
+
+  const endTime = new Date();
+  const executionTimeMs = endTime.getTime() - startTime.getTime();
+  
+  logDetailedToSheet({
+    eventType: "BOT_END",
+    timestamp: endTime,
+    executionTimeMs: executionTimeMs,
+    details: `Bot execution completed in ${executionTimeMs}ms`
+  });
 
   Logger.log("=== Bot finished ===\n");
 }
 
 // ====================================================================
-// 3. DRIVE MANAGEMENT FUNCTIONS
+// 3. ENHANCED DETAILED LOGGING FUNCTION
 // ====================================================================
 
-/**
- * Gets or creates the YouTube Bot Downloads folder in Google Drive
- */
-function getOrCreateDriveFolder() {
+function logDetailedToSheet(logData) {
   const C = getConstants();
-  const folders = DriveApp.getFoldersByName(C.DRIVE_FOLDER_NAME);
-  
-  if (folders.hasNext()) {
-    return folders.next();
-  } else {
-    const newFolder = DriveApp.createFolder(C.DRIVE_FOLDER_NAME);
-    log(`Created new Drive folder: ${C.DRIVE_FOLDER_NAME}`);
-    return newFolder;
+
+  try {
+    const ss = SpreadsheetApp.openById(C.LOG_SPREADSHEET_ID);
+    let sheet = ss.getSheetByName("Detailed Log");
+
+    const header = [
+      "Timestamp",
+      "Event Type",
+      "Sender Email",
+      "User Role",
+      "Request Type",
+      "Query/URLs",
+      "Video ID",
+      "Video Title",
+      "Channel Name",
+      "Video Duration",
+      "File Size (MB)",
+      "Delivery Method",
+      "Status",
+      "Error/Details",
+      "API Response Code",
+      "Processing Time (ms)",
+      "Thread Count",
+      "Link Count",
+      "Result Count",
+      "Additional Info"
+    ];
+
+    if (!sheet) {
+      sheet = ss.insertSheet("Detailed Log");
+      sheet.appendRow(header);
+      sheet.setFrozenRows(1);
+      sheet.getRange("A1:T1").setFontWeight("bold").setBackground("#1a73e8").setFontColor("white");
+      
+      // Set column widths for better readability
+      sheet.setColumnWidth(1, 150); // Timestamp
+      sheet.setColumnWidth(2, 120); // Event Type
+      sheet.setColumnWidth(3, 150); // Sender Email
+      sheet.setColumnWidth(4, 100); // User Role
+      sheet.setColumnWidth(5, 120); // Request Type
+      sheet.setColumnWidth(6, 200); // Query/URLs
+    }
+    
+    const row = [
+      logData.timestamp || new Date(),
+      logData.eventType || "-",
+      logData.sender || "-",
+      logData.userRole || "-",
+      logData.requestType || "-",
+      logData.query || logData.links || logData.queryOrUrls || "-",
+      logData.videoId || "-",
+      logData.videoTitle || "-",
+      logData.channelName || "-",
+      logData.duration || "-",
+      logData.sizeMb !== undefined ? logData.sizeMb.toFixed(2) : "-",
+      logData.deliveryMethod || "-",
+      logData.status || "-",
+      logData.error || logData.details || "-",
+      logData.responseCode || "-",
+      logData.processingTimeMs || "-",
+      logData.threadCount || "-",
+      logData.linkCount || "-",
+      logData.resultCount || "-",
+      logData.additionalInfo || "-"
+    ];
+
+    sheet.appendRow(row);
+    console.log(`LOGGED [${logData.eventType}]: ${logData.details || logData.status}`);
+  } catch (e) {
+    console.error("DETAILED LOGGING FAILED:", e.toString());
   }
 }
 
-/**
- * Uploads a blob to Google Drive and returns the shareable link
- */
-function uploadToDrive(blob, fileName) {
+// ====================================================================
+// 4. DRIVE MANAGEMENT FUNCTIONS
+// ====================================================================
+
+function getOrCreateDriveFolder() {
+  const C = getConstants();
+  const startTime = new Date().getTime();
+  
+  const folders = DriveApp.getFoldersByName(C.DRIVE_FOLDER_NAME);
+  
+  let folder;
+  if (folders.hasNext()) {
+    folder = folders.next();
+    logDetailedToSheet({
+      eventType: "DRIVE_FOLDER_FOUND",
+      timestamp: new Date(),
+      details: `Drive folder "${C.DRIVE_FOLDER_NAME}" located`,
+      processingTimeMs: new Date().getTime() - startTime
+    });
+  } else {
+    folder = DriveApp.createFolder(C.DRIVE_FOLDER_NAME);
+    logDetailedToSheet({
+      eventType: "DRIVE_FOLDER_CREATED",
+      timestamp: new Date(),
+      details: `New Drive folder "${C.DRIVE_FOLDER_NAME}" created`,
+      processingTimeMs: new Date().getTime() - startTime
+    });
+    log(`Created new Drive folder: ${C.DRIVE_FOLDER_NAME}`);
+  }
+  return folder;
+}
+
+function uploadToDrive(blob, fileName, sender, videoId) {
+  const startTime = new Date().getTime();
+  
   try {
     const folder = getOrCreateDriveFolder();
     const file = folder.createFile(blob.setName(fileName));
     
-    // Set sharing to anyone with the link can view
     file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
     
     const shareableLink = file.getUrl();
+    const processingTime = new Date().getTime() - startTime;
+    
+    logDetailedToSheet({
+      eventType: "DRIVE_UPLOAD_SUCCESS",
+      timestamp: new Date(),
+      sender: sender,
+      videoId: videoId,
+      videoTitle: fileName,
+      status: "Upload Successful",
+      details: `File uploaded to Google Drive: ${fileName}`,
+      processingTimeMs: processingTime,
+      additionalInfo: `File ID: ${file.getId()} | Link: ${shareableLink}`
+    });
+    
     log(`Uploaded to Drive: ${fileName}`);
     
     return {
@@ -133,6 +296,19 @@ function uploadToDrive(blob, fileName) {
       size: blob.getBytes().length
     };
   } catch (e) {
+    const processingTime = new Date().getTime() - startTime;
+    
+    logDetailedToSheet({
+      eventType: "DRIVE_UPLOAD_FAILED",
+      timestamp: new Date(),
+      sender: sender,
+      videoId: videoId,
+      videoTitle: fileName,
+      status: "Upload Failed",
+      error: e.toString(),
+      processingTimeMs: processingTime
+    });
+    
     log(`Drive upload failed: ${e.toString()}`);
     return {
       success: false,
@@ -142,71 +318,106 @@ function uploadToDrive(blob, fileName) {
 }
 
 // ====================================================================
-// 4. CORE HANDLERS
+// 5. CORE HANDLERS
 // ====================================================================
 
-/**
- * Handles emails containing direct YouTube links by downloading and uploading to Drive.
- */
 function handleDirectLinks(message, thread, links, sender) {
+  const startTime = new Date().getTime();
   const C = getConstants();
   
   if (!C.YOUTUBE_API_KEY) {
     sendApiKeyMissingReply(message, "Download Request");
+    logDetailedToSheet({
+      eventType: "API_KEY_MISSING",
+      timestamp: new Date(),
+      sender: sender,
+      requestType: "Direct Links",
+      linkCount: links.length,
+      status: "REJECTED",
+      error: "YouTube API key not configured"
+    });
     return;
   }
   
   const userRole = getUserRole(sender);
   const roleLimits = C.ROLE_LIMITS[userRole];
 
-  // --- USAGE CHECK & LIMIT ---
   const usageCheck = checkAndIncrementUsage(sender, 'download', links.length, userRole, roleLimits);
   if (!usageCheck.allowed) {
     sendLimitExceededReply(message, usageCheck, userRole, roleLimits);
-    logToSheet({
+    logDetailedToSheet({
+      eventType: "USAGE_LIMIT_EXCEEDED",
+      timestamp: new Date(),
       sender: sender,
+      userRole: userRole,
       requestType: "Direct Links",
-      queryOrUrls: links.join(", "),
-      actionDetail: `Rejected: ${usageCheck.message} (Role: ${userRole})`,
-      status: "LIMIT EXCEEDED"
+      linkCount: links.length,
+      status: "REJECTED",
+      error: usageCheck.message,
+      details: `User exceeded ${userRole} download limit`
     });
     return;
   }
 
   log(`Found ${links.length} direct YouTube link(s). Role: ${userRole}`);
   
-  logToSheet({
+  logDetailedToSheet({
+    eventType: "DIRECT_LINKS_PROCESSING_START",
+    timestamp: new Date(),
     sender: sender,
+    userRole: userRole,
     requestType: "Direct Links",
-    queryOrUrls: links.join(", "),
-    actionDetail: `${links.length} links requested (Role: ${userRole})`,
-    status: "Request Started"
+    linkCount: links.length,
+    links: links.join(" | "),
+    status: "Processing Started"
   });
 
   const videoResults = [];
   let totalSizeMB = 0;
   let successCount = 0;
-  const attachments = []; // For email attachments if small enough
+  let failureCount = 0;
+  const attachments = [];
   let totalAttachmentSizeMB = 0;
 
   for (const url of links) {
     const videoId = url.includes("v=") ? url.split("v=")[1].substring(0, 11) : url.split("/").pop().substring(0, 11);
+    const videoStartTime = new Date().getTime();
+    
     log(`Attempting to download ${videoId}...`);
+    
+    logDetailedToSheet({
+      eventType: "VIDEO_DOWNLOAD_START",
+      timestamp: new Date(),
+      sender: sender,
+      userRole: userRole,
+      videoId: videoId,
+      details: `Attempting to download video: ${videoId}`
+    });
 
     try {
-      // 1. Download Video Blob with quality based on user role
-      const qualityParam = userRole.replace(' ', '_'); // Convert 'pro user' to 'pro_user'
+      const qualityParam = userRole.replace(' ', '_');
       const downloadUrl = `${C.RAILWAY_ENDPOINT}/download?url=${encodeURIComponent(url)}&quality=${qualityParam}`;
       const response = UrlFetchApp.fetch(downloadUrl, { muteHttpExceptions: true });
-
-      if (response.getResponseCode() !== 200) {
-        throw new Error(`Download failed with status code ${response.getResponseCode()}`);
+      
+      const responseCode = response.getResponseCode();
+      
+      if (responseCode !== 200) {
+        throw new Error(`Download failed with status code ${responseCode}`);
       }
 
       const blob = response.getBlob();
       const sizeMB = Math.round(blob.getBytes().length / (1024 * 1024) * 10) / 10;
+      
+      logDetailedToSheet({
+        eventType: "VIDEO_BLOB_RECEIVED",
+        timestamp: new Date(),
+        sender: sender,
+        videoId: videoId,
+        sizeMb: sizeMB,
+        responseCode: responseCode,
+        details: `Video blob received from Railway endpoint`
+      });
 
-      // 2. Get Video Metadata from YouTube API
       const infoUrl = `${C.YOUTUBE_API_BASE}/videos?part=snippet,statistics,contentDetails&id=${videoId}&key=${C.YOUTUBE_API_KEY}`;
       const infoRes = UrlFetchApp.fetch(infoUrl);
       const infoData = JSON.parse(infoRes.getContentText()).items[0];
@@ -218,17 +429,25 @@ function handleDirectLinks(message, thread, links, sender) {
       const views = Number(infoData.statistics.viewCount || 0).toLocaleString();
       const uploadDate = Utilities.formatDate(new Date(infoData.snippet.publishedAt), "GMT", "MMM d, yyyy");
       const thumb = infoData.snippet.thumbnails.high.url;
-      
       const isoDuration = infoData.contentDetails?.duration;
       const duration = formatDuration(isoDuration);
 
       const cleanFileName = `${title} - ${channel}.mp4`;
 
-      // 3. Decide: Email attachment or Drive upload based on size
+      logDetailedToSheet({
+        eventType: "VIDEO_METADATA_RETRIEVED",
+        timestamp: new Date(),
+        sender: sender,
+        videoId: videoId,
+        videoTitle: title,
+        channelName: channel,
+        duration: duration,
+        sizeMb: sizeMB,
+        details: `Video metadata retrieved from YouTube API`
+      });
+
       if (sizeMB <= C.MAX_VIDEO_SIZE_MB) {
-        // Check if small enough for email attachment
         if (sizeMB <= C.EMAIL_ATTACHMENT_SIZE_MB && (totalAttachmentSizeMB + sizeMB) <= C.EMAIL_ATTACHMENT_SIZE_MB) {
-          // Small enough - send as email attachment
           attachments.push(blob.setName(cleanFileName));
           totalAttachmentSizeMB += sizeMB;
           totalSizeMB += sizeMB;
@@ -245,21 +464,27 @@ function handleDirectLinks(message, thread, links, sender) {
             sizeMB,
             duration,
             quality: roleLimits.quality,
-            deliveryMethod: 'email' // Mark as email attachment
+            deliveryMethod: 'email'
           });
           
-          logToSheet({
+          const videoProcessingTime = new Date().getTime() - videoStartTime;
+          logDetailedToSheet({
+            eventType: "VIDEO_DELIVERY_EMAIL",
+            timestamp: new Date(),
             sender: sender,
-            requestType: "Direct Links",
+            userRole: userRole,
             videoId: videoId,
-            title: cleanFileName,
-            actionDetail: "Attached to email (small file)",
+            videoTitle: cleanFileName,
+            channelName: channel,
+            duration: duration,
             sizeMb: sizeMB,
-            status: "Download Success"
+            deliveryMethod: "Email Attachment",
+            status: "SUCCESS",
+            details: `Video attached to email (${sizeMB} MB)`,
+            processingTimeMs: videoProcessingTime
           });
         } else {
-          // Too large for email - upload to Drive
-          const driveResult = uploadToDrive(blob, cleanFileName);
+          const driveResult = uploadToDrive(blob, cleanFileName, sender, videoId);
           
           if (driveResult.success) {
             totalSizeMB += sizeMB;
@@ -277,17 +502,25 @@ function handleDirectLinks(message, thread, links, sender) {
               duration,
               driveLink: driveResult.link,
               quality: roleLimits.quality,
-              deliveryMethod: 'drive' // Mark as Drive link
+              deliveryMethod: 'drive'
             });
             
-            logToSheet({
+            const videoProcessingTime = new Date().getTime() - videoStartTime;
+            logDetailedToSheet({
+              eventType: "VIDEO_DELIVERY_DRIVE",
+              timestamp: new Date(),
               sender: sender,
-              requestType: "Direct Links",
+              userRole: userRole,
               videoId: videoId,
-              title: cleanFileName,
-              actionDetail: "Uploaded to Drive",
+              videoTitle: cleanFileName,
+              channelName: channel,
+              duration: duration,
               sizeMb: sizeMB,
-              status: "Download Success"
+              deliveryMethod: "Google Drive",
+              status: "SUCCESS",
+              details: `Video uploaded to Google Drive (${sizeMB} MB)`,
+              processingTimeMs: videoProcessingTime,
+              additionalInfo: `Drive Link: ${driveResult.link}`
             });
           } else {
             throw new Error(`Drive upload failed: ${driveResult.error}`);
@@ -299,14 +532,17 @@ function handleDirectLinks(message, thread, links, sender) {
           error: `Video too large (${sizeMB} MB exceeds ${C.MAX_VIDEO_SIZE_MB} MB limit)`
         });
         
-        logToSheet({
+        failureCount++;
+        const videoProcessingTime = new Date().getTime() - videoStartTime;
+        logDetailedToSheet({
+          eventType: "VIDEO_SIZE_LIMIT_EXCEEDED",
+          timestamp: new Date(),
           sender: sender,
-          requestType: "Direct Links",
           videoId: videoId,
-          title: title,
-          actionDetail: `Skipped: Size limit exceeded`,
           sizeMb: sizeMB,
-          status: "Download Skipped"
+          status: "SKIPPED",
+          error: `Size limit exceeded (${sizeMB} MB > ${C.MAX_VIDEO_SIZE_MB} MB)`,
+          processingTimeMs: videoProcessingTime
         });
       }
 
@@ -317,45 +553,63 @@ function handleDirectLinks(message, thread, links, sender) {
         error: e.toString()
       });
       
+      failureCount++;
+      const videoProcessingTime = new Date().getTime() - videoStartTime;
+      
       log(`Failed ${videoId}: ${e.toString()}`);
       
-      logToSheet({
+      logDetailedToSheet({
+        eventType: "VIDEO_DOWNLOAD_FAILED",
+        timestamp: new Date(),
         sender: sender,
-        requestType: "Direct Links",
         videoId: videoId,
-        actionDetail: `URL: ${url} | Error: ${e.toString()}`,
-        status: "Download Failed"
+        status: "FAILED",
+        error: e.toString(),
+        processingTimeMs: videoProcessingTime,
+        details: `Failed to process video: ${e.toString()}`
       });
     }
   }
 
-  // 4. Send Reply with mixed delivery (attachments + Drive links)
   const htmlBody = buildMixedDeliveryReplyHtml(videoResults, totalAttachmentSizeMB);
   message.reply("Your videos from YouTube", { htmlBody: C.STYLE + htmlBody, attachments: attachments });
 
-  // Summary log
+  const totalProcessingTime = new Date().getTime() - startTime;
   const emailCount = videoResults.filter(v => v.deliveryMethod === 'email').length;
   const driveCount = videoResults.filter(v => v.deliveryMethod === 'drive').length;
   
-  logToSheet({
+  logDetailedToSheet({
+    eventType: "DIRECT_LINKS_PROCESSING_COMPLETE",
+    timestamp: new Date(),
     sender: sender,
+    userRole: userRole,
     requestType: "Direct Links",
-    actionDetail: `Delivered ${successCount} videos: ${emailCount} via email (${totalAttachmentSizeMB.toFixed(1)} MB), ${driveCount} via Drive`,
-    sizeMb: totalSizeMB,
-    status: "Batch Summary"
+    linkCount: links.length,
+    resultCount: successCount,
+    status: "COMPLETED",
+    details: `Processed ${successCount} videos successfully (${emailCount} email, ${driveCount} Drive), ${failureCount} failed`,
+    processingTimeMs: totalProcessingTime,
+    additionalInfo: `Total size: ${totalSizeMB.toFixed(1)} MB | Email size: ${totalAttachmentSizeMB.toFixed(1)} MB`
   });
 }
 
-/**
- * Handles search queries in the email body by calling the YouTube Search API.
- */
 function handleSearchQuery(message, thread, originalBody, sender) {
+  const startTime = new Date().getTime();
   const C = getConstants();
   let query = extractNewQuery(originalBody);
   const userRole = getUserRole(sender);
   const roleLimits = C.ROLE_LIMITS[userRole];
   
   const maxResults = roleLimits.maxResults; 
+
+  logDetailedToSheet({
+    eventType: "SEARCH_QUERY_RECEIVED",
+    timestamp: new Date(),
+    sender: sender,
+    userRole: userRole,
+    query: query.substring(0, 150),
+    details: `Search query received: "${query}"`
+  });
 
   if (query.toLowerCase() === "test_api_key") {
     testApiKeyStatus(message, sender, C.YOUTUBE_API_KEY);
@@ -364,6 +618,14 @@ function handleSearchQuery(message, thread, originalBody, sender) {
 
   if (!C.YOUTUBE_API_KEY) {
     sendApiKeyMissingReply(message, "Search Request");
+    logDetailedToSheet({
+      eventType: "API_KEY_MISSING",
+      timestamp: new Date(),
+      sender: sender,
+      requestType: "Search",
+      status: "REJECTED",
+      error: "YouTube API key not configured"
+    });
     return;
   }
 
@@ -371,12 +633,14 @@ function handleSearchQuery(message, thread, originalBody, sender) {
     log(`User requested help. Role: ${userRole}`);
     sendHelpCard(message, userRole, roleLimits);
     
-    logToSheet({
+    logDetailedToSheet({
+      eventType: "HELP_REQUESTED",
+      timestamp: new Date(),
       sender: sender,
-      requestType: "Smart Search",
-      queryOrUrls: query,
-      actionDetail: `Instructions sent (Role: ${userRole})`,
-      status: "Help Requested"
+      userRole: userRole,
+      requestType: "Help",
+      status: "COMPLETED",
+      details: `Help card sent to user`
     });
     return;
   }
@@ -384,33 +648,45 @@ function handleSearchQuery(message, thread, originalBody, sender) {
   const usageCheck = checkAndIncrementUsage(sender, 'search', 1, userRole, roleLimits);
   if (!usageCheck.allowed) {
     sendLimitExceededReply(message, usageCheck, userRole, roleLimits);
-    logToSheet({
+    logDetailedToSheet({
+      eventType: "USAGE_LIMIT_EXCEEDED",
+      timestamp: new Date(),
       sender: sender,
-      requestType: "Smart Search",
-      queryOrUrls: query,
-      actionDetail: `Rejected: ${usageCheck.message} (Role: ${userRole})`,
-      status: "LIMIT EXCEEDED"
+      userRole: userRole,
+      requestType: "Search",
+      query: query.substring(0, 100),
+      status: "REJECTED",
+      error: usageCheck.message
     });
     return;
   }
   
-  logToSheet({
-    sender: sender,
-    requestType: "Smart Search",
-    queryOrUrls: query,
-    actionDetail: `Search for: "${query}" (Role: ${userRole}, Max Results: ${maxResults})`,
-    status: "Request Started"
-  });
-
   log(`Smart search → extracted query: "${query}"`);
 
-  // Add language restriction to prefer English results
   const searchUrl = `${C.YOUTUBE_API_BASE}/search?part=snippet&maxResults=${maxResults}&q=${encodeURIComponent(query)}&type=video&relevanceLanguage=en&key=${C.YOUTUBE_API_KEY}`;
+
+  logDetailedToSheet({
+    eventType: "SEARCH_STARTED",
+    timestamp: new Date(),
+    sender: sender,
+    userRole: userRole,
+    query: query.substring(0, 150),
+    details: `YouTube search initiated for query: "${query}"`
+  });
 
   try {
     const searchResponse = UrlFetchApp.fetch(searchUrl);
     const searchData = JSON.parse(searchResponse.getContentText());
     let items = searchData.items || [];
+    
+    logDetailedToSheet({
+      eventType: "SEARCH_RESULTS_RECEIVED",
+      timestamp: new Date(),
+      sender: sender,
+      query: query.substring(0, 150),
+      resultCount: items.length,
+      details: `Search returned ${items.length} results`
+    });
     
     const videoIds = items.map(item => item.id.videoId).join(',');
     
@@ -434,6 +710,15 @@ function handleSearchQuery(message, thread, originalBody, sender) {
         item.contentDetails = videoInfo.contentDetails || {};
         return item;
       });
+      
+      logDetailedToSheet({
+        eventType: "SEARCH_METADATA_ENRICHED",
+        timestamp: new Date(),
+        sender: sender,
+        query: query.substring(0, 150),
+        resultCount: items.length,
+        details: `Search results enriched with statistics and duration data`
+      });
     }
 
     log(`Search returned ${items.length} results`);
@@ -441,58 +726,68 @@ function handleSearchQuery(message, thread, originalBody, sender) {
     const html = buildSearchResultsHtml(items, message.getTo(), query);
     message.reply(`Search results for: "${query}"`, { htmlBody: C.STYLE + html });
 
-    logToSheet({
+    const totalProcessingTime = new Date().getTime() - startTime;
+    logDetailedToSheet({
+      eventType: "SEARCH_COMPLETED",
+      timestamp: new Date(),
       sender: sender,
-      requestType: "Smart Search",
-      queryOrUrls: query,
-      actionDetail: `${items.length} results returned`,
-      status: "Search Success"
+      userRole: userRole,
+      requestType: "Search",
+      query: query.substring(0, 150),
+      resultCount: items.length,
+      status: "SUCCESS",
+      details: `Search completed and results sent to user`,
+      processingTimeMs: totalProcessingTime
     });
   } catch (e) {
     if (e.message.includes("returned code 400") && e.message.includes("API key not valid")) {
        log(`Search failed: API Key Error (400)`);
        sendApiKeyMissingReply(message, "Search Request", true);
-       logToSheet({
+       logDetailedToSheet({
+          eventType: "SEARCH_FAILED",
+          timestamp: new Date(),
           sender: sender,
-          requestType: "Smart Search",
-          queryOrUrls: query,
-          actionDetail: `Error: API Key Invalid (400)`,
-          status: "Search Failed"
+          query: query.substring(0, 150),
+          status: "FAILED",
+          error: "API Key Invalid (HTTP 400)",
+          responseCode: 400
        });
        return;
     }
     
     log(`Search failed: ${e.message}`);
-    logToSheet({
+    const totalProcessingTime = new Date().getTime() - startTime;
+    logDetailedToSheet({
+      eventType: "SEARCH_FAILED",
+      timestamp: new Date(),
       sender: sender,
-      requestType: "Smart Search",
-      queryOrUrls: query,
-      actionDetail: `Error: ${e.message}`,
-      status: "Search Failed"
+      query: query.substring(0, 150),
+      status: "FAILED",
+      error: e.toString(),
+      processingTimeMs: totalProcessingTime
     });
     message.reply("Search failed — an unexpected error occurred. Check the logs for details.");
   }
 }
 
-/**
- * Tests the status of the YouTube API key.
- */
 function testApiKeyStatus(message, sender, apiKey) {
     const C = getConstants();
+    const testStartTime = new Date().getTime();
     
-    let status, details, color, icon;
+    let status, details, color, icon, responseCode;
     
     if (!apiKey) {
         status = "Key Missing";
         details = "The 'YOUTUBE_API_KEY' property is not set in Script Properties. Please add your key.";
         color = "#ff6600";
         icon = "⚠️";
+        responseCode = "N/A";
     } else {
         const testUrl = `${C.YOUTUBE_API_BASE}/search?part=id&maxResults=1&q=test&key=${apiKey}`;
         
         try {
             const response = UrlFetchApp.fetch(testUrl, { muteHttpExceptions: true });
-            const responseCode = response.getResponseCode();
+            responseCode = response.getResponseCode();
             
             if (responseCode === 200) {
                 status = "Key Valid & Working";
@@ -520,8 +815,21 @@ function testApiKeyStatus(message, sender, apiKey) {
             details = `Failed to connect to the Google API endpoint: ${e.toString()}`;
             color = "#757575";
             icon = "🔌";
+            responseCode = "ERROR";
         }
     }
+
+    const testProcessingTime = new Date().getTime() - testStartTime;
+    logDetailedToSheet({
+      eventType: "API_KEY_TEST",
+      timestamp: new Date(),
+      sender: sender,
+      requestType: "API Test",
+      status: status,
+      responseCode: responseCode,
+      details: `API Key Test: ${status} | ${details}`,
+      processingTimeMs: testProcessingTime
+    });
 
     const html = `
       <div style="font-family:'Roboto',Arial,sans-serif; max-width:600px; margin:20px auto; padding:25px; background:#f5f5f5; color:#333; border:1px solid #ddd; border-radius:12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1);">
@@ -529,6 +837,8 @@ function testApiKeyStatus(message, sender, apiKey) {
         <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee;">
             <p style="font-size:16px; margin-bottom:10px;"><strong>Status:</strong> <span style="color:${color}; font-weight:bold;">${status}</span></p>
             <p style="font-size:14px; line-height:1.5;"><strong>Details:</strong> ${details}</p>
+            <p style="font-size:13px; color:#666; margin-top:10px;"><strong>Response Code:</strong> ${responseCode}</p>
+            <p style="font-size:13px; color:#666;"><strong>Test Duration:</strong> ${testProcessingTime}ms</p>
         </div>
         <p style="font-size:12px; color:#777; margin-top:20px; text-align:center;">
           Run this test again by sending an email with the subject "bt" and body: <code style="background:#f0f0f0; padding:2px 5px; border-radius:3px;">test_api_key</code>
@@ -537,19 +847,8 @@ function testApiKeyStatus(message, sender, apiKey) {
     `;
 
     message.reply("YouTube API Key Status Check", { htmlBody: C.STYLE + html });
-    
-    logToSheet({
-      sender: sender,
-      requestType: "API Key Test",
-      queryOrUrls: "test_api_key",
-      actionDetail: `Key Status: ${status} | Details: ${details}`,
-      status: status
-    });
 }
 
-/**
- * Sends a specific reply when the API Key is detected as missing or invalid.
- */
 function sendApiKeyMissingReply(message, requestType, isInvalid = false) {
     const C = getConstants();
     const status = isInvalid ? "Invalid API Key" : "API Key Missing";
@@ -578,7 +877,7 @@ function sendApiKeyMissingReply(message, requestType, isInvalid = false) {
 }
 
 // ====================================================================
-// 5. USAGE AND ROLE TRACKING FUNCTIONS
+// 6. USAGE AND ROLE TRACKING FUNCTIONS
 // ====================================================================
 
 function getUserRolesSheet() {
@@ -761,7 +1060,7 @@ function checkAndIncrementUsage(sender, type, count, userRole, roleLimits) {
 }
 
 // ====================================================================
-// 6. GENERIC UTILITY FUNCTIONS
+// 7. UTILITY FUNCTIONS
 // ====================================================================
 
 function log(msg) {
@@ -797,41 +1096,6 @@ function sendLimitExceededReply(message, usageCheck, userRole, roleLimits) {
     </div>
   `;
   message.reply("Action Rejected: Usage Limit Reached", { htmlBody: C.STYLE + html });
-}
-
-function logToSheet(logData) {
-  const C = getConstants();
-
-  try {
-    const ss = SpreadsheetApp.openById(C.LOG_SPREADSHEET_ID);
-    let sheet = ss.getSheetByName("Log");
-
-    const header = ["Timestamp", "User Email", "Request Type", "Query/URLs", "Video ID", "Title", "Action Detail", "Size (MB)", "Status"];
-
-    if (!sheet) {
-      sheet = ss.insertSheet("Log");
-      sheet.appendRow(header);
-      sheet.setFrozenRows(1);
-      sheet.getRange("A1:I1").setFontWeight("bold").setBackground("#4285f4").setFontColor("white"); 
-    }
-    
-    const row = [
-      new Date(),
-      logData.sender || "-",
-      logData.requestType || "-",
-      logData.queryOrUrls || "-",
-      logData.videoId || "-",
-      logData.title || "-",
-      logData.actionDetail || "-",
-      logData.sizeMb !== undefined && logData.sizeMb !== null ? logData.sizeMb.toFixed(2) : "-",
-      logData.status || "Unknown"
-    ];
-
-    sheet.appendRow(row);
-    console.log(`LOGGED to permanent sheet: ${logData.status} - ${logData.actionDetail || logData.requestType}`);
-  } catch (e) {
-    console.error("LOGGING FAILED:", e.toString());
-  }
 }
 
 function extractNewQuery(originalBody) {
@@ -891,7 +1155,7 @@ function formatDuration(isoDuration) {
 }
 
 // ====================================================================
-// 7. HTML TEMPLATE GENERATION (Mixed Delivery: Email + Drive)
+// 8. HTML TEMPLATE GENERATION
 // ====================================================================
 
 function buildMixedDeliveryReplyHtml(videoResults, totalAttachmentSizeMB) {
@@ -903,7 +1167,6 @@ function buildMixedDeliveryReplyHtml(videoResults, totalAttachmentSizeMB) {
     if (result.success) {
       if (result.deliveryMethod === 'email') {
         hasAttachments = true;
-        // Email attachment card
         videoCards += `
     <div style="background:white; border-radius:12px; overflow:hidden; margin:20px 0; box-shadow:0 4px 12px rgba(0,0,0,0.1); border-left:4px solid #0f9d58;">
       <div style="position:relative; background-color:#000;">
@@ -930,7 +1193,6 @@ function buildMixedDeliveryReplyHtml(videoResults, totalAttachmentSizeMB) {
   `;
       } else if (result.deliveryMethod === 'drive') {
         hasDriveLinks = true;
-        // Drive link card
         videoCards += `
     <div style="background:white; border-radius:12px; overflow:hidden; margin:20px 0; box-shadow:0 4px 12px rgba(0,0,0,0.1); border-left:4px solid #4285f4;">
       <div style="position:relative; background-color:#000;">
@@ -965,7 +1227,6 @@ function buildMixedDeliveryReplyHtml(videoResults, totalAttachmentSizeMB) {
     }
   });
 
-  // Build summary message
   let summaryMsg = '';
   if (hasAttachments && hasDriveLinks) {
     summaryMsg = `Some videos are attached directly to this email (${totalAttachmentSizeMB.toFixed(1)} MB), while larger ones are available via Google Drive links below.`;
@@ -994,69 +1255,6 @@ function buildMixedDeliveryReplyHtml(videoResults, totalAttachmentSizeMB) {
         <hr style="border:0; border-top:1px dashed #ddd; margin:30px 0;">
         <p style="color:#777; font-size:12px; text-align:center;">
           Generated by the YouTube Bot Service. Small videos (≤24MB) are attached directly, larger ones are in "${getConstants().DRIVE_FOLDER_NAME}" folder.
-        </p>
-      </div>
-    </div>
-  `;
-}
-
-function buildDriveDownloadReplyHtml(videoResults) {
-  let videoCards = '';
-  
-  videoResults.forEach(result => {
-    if (result.success) {
-      videoCards += `
-    <div style="background:white; border-radius:12px; overflow:hidden; margin:20px 0; box-shadow:0 4px 12px rgba(0,0,0,0.1);">
-      <div style="position:relative; background-color:#000;">
-        <img src="${result.thumb}" width="100%" style="max-width:100%; display:block; height:auto; border-bottom:3px solid #FF0000;">
-        <div style="position:absolute; bottom:8px; right:8px; background:rgba(0,0,0,0.8); color:white; padding:2px 6px; border-radius:4px; font-size:12px;">${result.quality || '360p'} MP4</div>
-      </div>
-
-      <div style="padding:16px;">
-        <div style="font-weight:700; font-size:18px; color:#111; margin-bottom:8px; line-height:1.3;">${result.title}</div>
-        <div style="color:#606060; font-size:14px; margin:4px 0;">
-          <strong style="color:#000;">${result.channel}</strong> • Duration: ${result.duration} • ${result.views} views • ${result.uploadDate}
-        </div>
-        
-        <div style="margin-top:12px; padding-top:12px; border-top:1px solid #eee;">
-          <div style="display:flex; justify-content:space-between; align-items:center;">
-            <strong style="color:#0f9d58; font-size:15px;">✅ Uploaded to Drive</strong>
-            <span style="color:#555; font-size:13px;">${result.sizeMB} MB</span>
-          </div>
-          <p style="margin:8px 0 0; color:#333; font-size:14px;">File: <strong>${result.cleanFileName}</strong></p>
-          
-          <a href="${result.driveLink}" 
-             style="display:inline-block; margin-top:12px; background:#4285f4; color:white; padding:10px 20px; border-radius:6px; text-decoration:none; font-weight:bold; font-size:14px;">
-            📥 Download from Google Drive
-          </a>
-        </div>
-      </div>
-    </div>
-  `;
-    } else {
-      videoCards += `<div style="background:#fff3f3; color:#c00; padding:15px; border-radius:8px; border:1px solid #c00; margin:10px 0;">Failed: ${result.error}</div>`;
-    }
-  });
-
-  return `
-    <div style="font-family:'Roboto',Arial,sans-serif; max-width:750px; margin:0 auto; background:#f5f5f5; color:#000; padding:20px; border-radius:16px;">
-      <div style="background:#FF0000; padding:15px 20px; text-align:left; border-radius:12px 12px 0 0;">
-        <h1 style="margin:0; color:white; font-size:24px; font-weight:700; letter-spacing:1px;">
-          YouTube Bot <span style="font-weight:400; font-size:16px; margin-left:10px;">| Drive Links Ready</span>
-        </h1>
-      </div>
-      
-      <div style="padding:20px 20px 30px; background:white; border-radius:0 0 12px 12px; box-shadow:0 8px 15px rgba(0,0,0,0.05);">
-        <h2 style="color:#111; font-size:22px; margin-bottom:15px; border-bottom:2px solid #eee; padding-bottom:10px;">Your Videos on Google Drive</h2>
-        <p style="font-size:16px; color:#333; margin-bottom:20px;">
-          Your videos have been uploaded to Google Drive. Click the download buttons below to access them.
-        </p>
-        
-        <div>${videoCards}</div>
-
-        <hr style="border:0; border-top:1px dashed #ddd; margin:30px 0;">
-        <p style="color:#777; font-size:12px; text-align:center;">
-          Generated by the YouTube Bot Service. Files are stored in the "${getConstants().DRIVE_FOLDER_NAME}" folder in your Google Drive.
         </p>
       </div>
     </div>
@@ -1161,28 +1359,3 @@ function sendHelpCard(message, userRole, roleLimits) {
       
       <div style="background:rgba(255,255,255,0.9); padding:25px; border-radius:15px; margin:30px 0; font-size:17px; line-height:1.8; color:#333; text-align:left;">
         <strong style="color:#FF0000; font-size:18px; display:block; margin-bottom:15px; text-align:center;">How to use me (Just reply to this email):</strong>
-        <ul style="list-style:none; padding:0; margin:0;">
-          <li style="margin-bottom:10px; padding-left:25px; position:relative;">
-            <span style="position:absolute; left:0; color:#FF0000; font-size:20px;">&bull;</span> 
-            Paste **YouTube links** &rarr; I upload videos to Google Drive and send you the links.
-            <small style="color:#666; display:block; margin-top:3px;">Your Download Limit: <strong>${displayDownloads}</strong> per day.</small>
-          </li>
-          <li style="margin-bottom:10px; padding-left:25px; position:relative;">
-            <span style="position:absolute; left:0; color:#FF0000; font-size:20px;">&bull;</span> 
-            Type a **search query** (e.g., "new cat videos") &rarr; I send the top <strong>${roleLimits.maxResults}</strong> results.
-            <small style="color:#666; display:block; margin-top:3px;">Your Search Limit: <strong>${displaySearches}</strong> per day.</small>
-          </li>
-          <li style="margin-bottom:10px; padding-left:25px; position:relative;">
-            <span style="position:absolute; left:0; color:#FF0000; font-size:20px;">&bull;</span> 
-            Type <code style="background:#ddd; color:#333; padding:3px 8px; border-radius:4px; font-weight:bold;">info</code> or <code style="background:#ddd; color:#333; padding:3px 8px; border-radius:4px; font-weight:bold;">help</code> &rarr; see this guide.
-          </li>
-        </ul>
-        <strong style="display:block; margin-top:20px; padding-top:10px; border-top:1px solid #ccc; text-align:center;">
-          <span style="color:#FF0000;">Your Current Role: ${roleLimits.label} (${userRole})</span> | Videos are saved to your Google Drive in ${roleLimits.quality} MP4 format.
-        </strong>
-      </div>
-      <p style="font-size:14px; opacity:0.8; margin-top:20px;">Service Status: Online and Ready | Email subject: "bt"</p>
-    </div>`;
-
-  message.reply("How to use your YouTube Bot", { htmlBody: C.STYLE + html });
-}
