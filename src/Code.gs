@@ -13,7 +13,7 @@ function getConstants() {
   return {
     RAILWAY_ENDPOINT: "https://yt-mail.onrender.com",
     YOUTUBE_API_BASE: "https://www.googleapis.com/youtube/v3",
-    LOG_SPREADSHEET_ID: "1vxiRaNLMW5mtlrneiRBnzx0PKgvKJAmGqVnALKH6vFA",
+    LOG_SPREADSHEET_ID: "1Potx9BeXT-USmEKeBR4ouw7r1JY6MgCmSLYctqfdaXI",
     DRIVE_FOLDER_NAME: "YouTube Bot Downloads",
     MAX_VIDEO_SIZE_MB: 100,
     EMAIL_ATTACHMENT_SIZE_MB: 24,
