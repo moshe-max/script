@@ -25,17 +25,18 @@ function getConstants() {
   return {
     RAILWAY_ENDPOINT: "https://yt-mail.onrender.com",
     YOUTUBE_API_BASE: "https://www.googleapis.com/youtube/v3",
-    LOG_SPREADSHEET_ID: "1Potx9BeXT-USmEKeBR4ouw7r1JY6MgCmSLYctqfdaXI",
+    LOG_SPREADSHEET_ID: "1vxiRaNLMW5mtlrneiRBnzx0PKgvKJAmGqVnALKH6vFA",
     DRIVE_FOLDER_NAME: "YouTube Bot Downloads", // Folder name in Google Drive
-    MAX_VIDEO_SIZE_MB: 100, // Increased limit since we're not limited by email attachment size
+    MAX_VIDEO_SIZE_MB: 100, // Max size for Drive uploads
+    EMAIL_ATTACHMENT_SIZE_MB: 24, // If video is under this, send as email attachment instead
 
     // USAGE LIMITS (Role-based)
     ROLE_LIMITS: {
-      'admin': { downloads: Infinity, searches: Infinity, maxResults: 15, label: 'Admin' }, 
-      'pro plus': { downloads: 25, searches: 25, maxResults: 15, label: 'Pro Plus User' },
-      'pro user': { downloads: 12, searches: 12, maxResults: 12, label: 'Pro User' },
-      'user': { downloads: 5, searches: 5, maxResults: 5, label: 'Standard User' },
-      'guest': { downloads: 1, searches: 5, maxResults: 5, label: 'Guest' }
+      'admin': { downloads: Infinity, searches: Infinity, maxResults: 15, label: 'Admin', quality: '720p' }, 
+      'pro plus': { downloads: 25, searches: 25, maxResults: 15, label: 'Pro Plus User', quality: '720p' },
+      'pro user': { downloads: 12, searches: 12, maxResults: 12, label: 'Pro User', quality: '480p' },
+      'user': { downloads: 5, searches: 5, maxResults: 5, label: 'Standard User', quality: '360p' },
+      'guest': { downloads: 1, searches: 5, maxResults: 5, label: 'Guest', quality: '240p' }
     },
     DEFAULT_ROLE: 'guest',
     USAGE_WINDOW_MINUTES: 1440, // 24 hours
@@ -185,14 +186,17 @@ function handleDirectLinks(message, thread, links, sender) {
   const videoResults = [];
   let totalSizeMB = 0;
   let successCount = 0;
+  const attachments = []; // For email attachments if small enough
+  let totalAttachmentSizeMB = 0;
 
   for (const url of links) {
     const videoId = url.includes("v=") ? url.split("v=")[1].substring(0, 11) : url.split("/").pop().substring(0, 11);
     log(`Attempting to download ${videoId}...`);
 
     try {
-      // 1. Download Video Blob
-      const downloadUrl = `${C.RAILWAY_ENDPOINT}/download?url=${encodeURIComponent(url)}`;
+      // 1. Download Video Blob with quality based on user role
+      const qualityParam = userRole.replace(' ', '_'); // Convert 'pro user' to 'pro_user'
+      const downloadUrl = `${C.RAILWAY_ENDPOINT}/download?url=${encodeURIComponent(url)}&quality=${qualityParam}`;
       const response = UrlFetchApp.fetch(downloadUrl, { muteHttpExceptions: true });
 
       if (response.getResponseCode() !== 200) {
@@ -220,11 +224,13 @@ function handleDirectLinks(message, thread, links, sender) {
 
       const cleanFileName = `${title} - ${channel}.mp4`;
 
-      // 3. Upload to Drive
+      // 3. Decide: Email attachment or Drive upload based on size
       if (sizeMB <= C.MAX_VIDEO_SIZE_MB) {
-        const driveResult = uploadToDrive(blob, cleanFileName);
-        
-        if (driveResult.success) {
+        // Check if small enough for email attachment
+        if (sizeMB <= C.EMAIL_ATTACHMENT_SIZE_MB && (totalAttachmentSizeMB + sizeMB) <= C.EMAIL_ATTACHMENT_SIZE_MB) {
+          // Small enough - send as email attachment
+          attachments.push(blob.setName(cleanFileName));
+          totalAttachmentSizeMB += sizeMB;
           totalSizeMB += sizeMB;
           successCount++;
 
@@ -238,7 +244,8 @@ function handleDirectLinks(message, thread, links, sender) {
             cleanFileName,
             sizeMB,
             duration,
-            driveLink: driveResult.link
+            quality: roleLimits.quality,
+            deliveryMethod: 'email' // Mark as email attachment
           });
           
           logToSheet({
@@ -246,12 +253,45 @@ function handleDirectLinks(message, thread, links, sender) {
             requestType: "Direct Links",
             videoId: videoId,
             title: cleanFileName,
-            actionDetail: "Uploaded to Drive",
+            actionDetail: "Attached to email (small file)",
             sizeMb: sizeMB,
             status: "Download Success"
           });
         } else {
-          throw new Error(`Drive upload failed: ${driveResult.error}`);
+          // Too large for email - upload to Drive
+          const driveResult = uploadToDrive(blob, cleanFileName);
+          
+          if (driveResult.success) {
+            totalSizeMB += sizeMB;
+            successCount++;
+
+            videoResults.push({
+              success: true,
+              title,
+              channel,
+              views,
+              uploadDate,
+              thumb,
+              cleanFileName,
+              sizeMB,
+              duration,
+              driveLink: driveResult.link,
+              quality: roleLimits.quality,
+              deliveryMethod: 'drive' // Mark as Drive link
+            });
+            
+            logToSheet({
+              sender: sender,
+              requestType: "Direct Links",
+              videoId: videoId,
+              title: cleanFileName,
+              actionDetail: "Uploaded to Drive",
+              sizeMb: sizeMB,
+              status: "Download Success"
+            });
+          } else {
+            throw new Error(`Drive upload failed: ${driveResult.error}`);
+          }
         }
       } else {
         videoResults.push({
@@ -289,15 +329,18 @@ function handleDirectLinks(message, thread, links, sender) {
     }
   }
 
-  // 4. Send Reply with Drive Links
-  const htmlBody = buildDriveDownloadReplyHtml(videoResults);
-  message.reply("Your videos from YouTube (Drive Links)", { htmlBody: C.STYLE + htmlBody });
+  // 4. Send Reply with mixed delivery (attachments + Drive links)
+  const htmlBody = buildMixedDeliveryReplyHtml(videoResults, totalAttachmentSizeMB);
+  message.reply("Your videos from YouTube", { htmlBody: C.STYLE + htmlBody, attachments: attachments });
 
   // Summary log
+  const emailCount = videoResults.filter(v => v.deliveryMethod === 'email').length;
+  const driveCount = videoResults.filter(v => v.deliveryMethod === 'drive').length;
+  
   logToSheet({
     sender: sender,
     requestType: "Direct Links",
-    actionDetail: `Uploaded ${successCount} videos (${(totalSizeMB).toFixed(1)} MB) of ${links.length} total to Drive`,
+    actionDetail: `Delivered ${successCount} videos: ${emailCount} via email (${totalAttachmentSizeMB.toFixed(1)} MB), ${driveCount} via Drive`,
     sizeMb: totalSizeMB,
     status: "Batch Summary"
   });
@@ -744,6 +787,7 @@ function sendLimitExceededReply(message, usageCheck, userRole, roleLimits) {
             <li style="margin-bottom:5px; color:#333;">Downloads Limit: <strong style="float:right;">${currentDownloads} / ${displayDownloads}</strong></li>
             <li style="color:#333;">Searches Limit: <strong style="float:right;">${currentSearches} / ${displaySearches}</strong></li>
             <li style="color:#333;">Search Results Max: <strong style="float:right;">${roleLimits.maxResults}</strong></li>
+            <li style="color:#333;">Video Quality: <strong style="float:right;">${roleLimits.quality}</strong></li>
           </ul>
       </div>
       <p style="font-size:14px; margin-top:20px; color:#777;">
@@ -846,8 +890,114 @@ function formatDuration(isoDuration) {
 }
 
 // ====================================================================
-// 7. HTML TEMPLATE GENERATION (Drive Links)
+// 7. HTML TEMPLATE GENERATION (Mixed Delivery: Email + Drive)
 // ====================================================================
+
+function buildMixedDeliveryReplyHtml(videoResults, totalAttachmentSizeMB) {
+  let videoCards = '';
+  let hasAttachments = false;
+  let hasDriveLinks = false;
+  
+  videoResults.forEach(result => {
+    if (result.success) {
+      if (result.deliveryMethod === 'email') {
+        hasAttachments = true;
+        // Email attachment card
+        videoCards += `
+    <div style="background:white; border-radius:12px; overflow:hidden; margin:20px 0; box-shadow:0 4px 12px rgba(0,0,0,0.1); border-left:4px solid #0f9d58;">
+      <div style="position:relative; background-color:#000;">
+        <img src="${result.thumb}" width="100%" style="max-width:100%; display:block; height:auto; border-bottom:3px solid #0f9d58;">
+        <div style="position:absolute; bottom:8px; right:8px; background:rgba(0,0,0,0.8); color:white; padding:2px 6px; border-radius:4px; font-size:12px;">${result.quality || '360p'} MP4</div>
+      </div>
+
+      <div style="padding:16px;">
+        <div style="font-weight:700; font-size:18px; color:#111; margin-bottom:8px; line-height:1.3;">${result.title}</div>
+        <div style="color:#606060; font-size:14px; margin:4px 0;">
+          <strong style="color:#000;">${result.channel}</strong> • Duration: ${result.duration} • ${result.views} views • ${result.uploadDate}
+        </div>
+        
+        <div style="margin-top:12px; padding-top:12px; border-top:1px solid #eee;">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <strong style="color:#0f9d58; font-size:15px;">📎 Email Attachment</strong>
+            <span style="color:#555; font-size:13px;">${result.sizeMB} MB</span>
+          </div>
+          <p style="margin:8px 0 0; color:#333; font-size:14px;">File: <strong>${result.cleanFileName}</strong></p>
+          <p style="margin:6px 0 0; color:#666; font-size:12px; font-style:italic;">✓ Attached to this email - click download icon in Gmail</p>
+        </div>
+      </div>
+    </div>
+  `;
+      } else if (result.deliveryMethod === 'drive') {
+        hasDriveLinks = true;
+        // Drive link card
+        videoCards += `
+    <div style="background:white; border-radius:12px; overflow:hidden; margin:20px 0; box-shadow:0 4px 12px rgba(0,0,0,0.1); border-left:4px solid #4285f4;">
+      <div style="position:relative; background-color:#000;">
+        <img src="${result.thumb}" width="100%" style="max-width:100%; display:block; height:auto; border-bottom:3px solid #4285f4;">
+        <div style="position:absolute; bottom:8px; right:8px; background:rgba(0,0,0,0.8); color:white; padding:2px 6px; border-radius:4px; font-size:12px;">${result.quality || '360p'} MP4</div>
+      </div>
+
+      <div style="padding:16px;">
+        <div style="font-weight:700; font-size:18px; color:#111; margin-bottom:8px; line-height:1.3;">${result.title}</div>
+        <div style="color:#606060; font-size:14px; margin:4px 0;">
+          <strong style="color:#000;">${result.channel}</strong> • Duration: ${result.duration} • ${result.views} views • ${result.uploadDate}
+        </div>
+        
+        <div style="margin-top:12px; padding-top:12px; border-top:1px solid #eee;">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <strong style="color:#4285f4; font-size:15px;">☁️ Google Drive</strong>
+            <span style="color:#555; font-size:13px;">${result.sizeMB} MB</span>
+          </div>
+          <p style="margin:8px 0 0; color:#333; font-size:14px;">File: <strong>${result.cleanFileName}</strong></p>
+          
+          <a href="${result.driveLink}" 
+             style="display:inline-block; margin-top:12px; background:#4285f4; color:white; padding:10px 20px; border-radius:6px; text-decoration:none; font-weight:bold; font-size:14px;">
+            📥 Download from Google Drive
+          </a>
+        </div>
+      </div>
+    </div>
+  `;
+      }
+    } else {
+      videoCards += `<div style="background:#fff3f3; color:#c00; padding:15px; border-radius:8px; border:1px solid #c00; margin:10px 0;">Failed: ${result.error}</div>`;
+    }
+  });
+
+  // Build summary message
+  let summaryMsg = '';
+  if (hasAttachments && hasDriveLinks) {
+    summaryMsg = `Some videos are attached directly to this email (${totalAttachmentSizeMB.toFixed(1)} MB), while larger ones are available via Google Drive links below.`;
+  } else if (hasAttachments) {
+    summaryMsg = `All your videos are attached directly to this email (${totalAttachmentSizeMB.toFixed(1)} MB total). Click the download icon in Gmail to save them.`;
+  } else if (hasDriveLinks) {
+    summaryMsg = `Your videos have been uploaded to Google Drive. Click the download buttons below to access them.`;
+  }
+
+  return `
+    <div style="font-family:'Roboto',Arial,sans-serif; max-width:750px; margin:0 auto; background:#f5f5f5; color:#000; padding:20px; border-radius:16px;">
+      <div style="background:#FF0000; padding:15px 20px; text-align:left; border-radius:12px 12px 0 0;">
+        <h1 style="margin:0; color:white; font-size:24px; font-weight:700; letter-spacing:1px;">
+          YouTube Bot <span style="font-weight:400; font-size:16px; margin-left:10px;">| Videos Ready</span>
+        </h1>
+      </div>
+      
+      <div style="padding:20px 20px 30px; background:white; border-radius:0 0 12px 12px; box-shadow:0 8px 15px rgba(0,0,0,0.05);">
+        <h2 style="color:#111; font-size:22px; margin-bottom:15px; border-bottom:2px solid #eee; padding-bottom:10px;">Your Videos</h2>
+        <p style="font-size:16px; color:#333; margin-bottom:20px;">
+          ${summaryMsg}
+        </p>
+        
+        <div>${videoCards}</div>
+
+        <hr style="border:0; border-top:1px dashed #ddd; margin:30px 0;">
+        <p style="color:#777; font-size:12px; text-align:center;">
+          Generated by the YouTube Bot Service. Small videos (≤24MB) are attached directly, larger ones are in "${getConstants().DRIVE_FOLDER_NAME}" folder.
+        </p>
+      </div>
+    </div>
+  `;
+}
 
 function buildDriveDownloadReplyHtml(videoResults) {
   let videoCards = '';
@@ -858,7 +1008,7 @@ function buildDriveDownloadReplyHtml(videoResults) {
     <div style="background:white; border-radius:12px; overflow:hidden; margin:20px 0; box-shadow:0 4px 12px rgba(0,0,0,0.1);">
       <div style="position:relative; background-color:#000;">
         <img src="${result.thumb}" width="100%" style="max-width:100%; display:block; height:auto; border-bottom:3px solid #FF0000;">
-        <div style="position:absolute; bottom:8px; right:8px; background:rgba(0,0,0,0.8); color:white; padding:2px 6px; border-radius:4px; font-size:12px;">360p MP4</div>
+        <div style="position:absolute; bottom:8px; right:8px; background:rgba(0,0,0,0.8); color:white; padding:2px 6px; border-radius:4px; font-size:12px;">${result.quality || '360p'} MP4</div>
       </div>
 
       <div style="padding:16px;">
@@ -1027,7 +1177,7 @@ function sendHelpCard(message, userRole, roleLimits) {
           </li>
         </ul>
         <strong style="display:block; margin-top:20px; padding-top:10px; border-top:1px solid #ccc; text-align:center;">
-          <span style="color:#FF0000;">Your Current Role: ${roleLimits.label} (${userRole})</span> | Videos are saved to your Google Drive in 360p MP4 format.
+          <span style="color:#FF0000;">Your Current Role: ${roleLimits.label} (${userRole})</span> | Videos are saved to your Google Drive in ${roleLimits.quality} MP4 format.
         </strong>
       </div>
       <p style="font-size:14px; opacity:0.8; margin-top:20px;">Service Status: Online and Ready | Email subject: "bt"</p>
