@@ -1359,3 +1359,28 @@ function sendHelpCard(message, userRole, roleLimits) {
       
       <div style="background:rgba(255,255,255,0.9); padding:25px; border-radius:15px; margin:30px 0; font-size:17px; line-height:1.8; color:#333; text-align:left;">
         <strong style="color:#FF0000; font-size:18px; display:block; margin-bottom:15px; text-align:center;">How to use me (Just reply to this email):</strong>
+        <ul style="list-style:none; padding:0; margin:0;">
+          <li style="margin-bottom:10px; padding-left:25px; position:relative;">
+            <span style="position:absolute; left:0; color:#FF0000; font-size:20px;">&bull;</span> 
+            Paste **YouTube links** &rarr; I upload videos to Google Drive and send you the links.
+            <small style="color:#666; display:block; margin-top:3px;">Your Download Limit: <strong>${displayDownloads}</strong> per day.</small>
+          </li>
+          <li style="margin-bottom:10px; padding-left:25px; position:relative;">
+            <span style="position:absolute; left:0; color:#FF0000; font-size:20px;">&bull;</span> 
+            Type a **search query** (e.g., "new cat videos") &rarr; I send the top <strong>${roleLimits.maxResults}</strong> results.
+            <small style="color:#666; display:block; margin-top:3px;">Your Search Limit: <strong>${displaySearches}</strong> per day.</small>
+          </li>
+          <li style="margin-bottom:10px; padding-left:25px; position:relative;">
+            <span style="position:absolute; left:0; color:#FF0000; font-size:20px;">&bull;</span> 
+            Type <code style="background:#ddd; color:#333; padding:3px 8px; border-radius:4px; font-weight:bold;">info</code> or <code style="background:#ddd; color:#333; padding:3px 8px; border-radius:4px; font-weight:bold;">help</code> &rarr; see this guide.
+          </li>
+        </ul>
+        <strong style="display:block; margin-top:20px; padding-top:10px; border-top:1px solid #ccc; text-align:center;">
+          <span style="color:#FF0000;">Your Current Role: ${roleLimits.label} (${userRole})</span> | Videos are saved to your Google Drive in ${roleLimits.quality} MP4 format.
+        </strong>
+      </div>
+      <p style="font-size:14px; opacity:0.8; margin-top:20px;">Service Status: Online and Ready | Email subject: "bt"</p>
+    </div>`;
+
+  message.reply("How to use your YouTube Bot", { htmlBody: C.STYLE + html });
+}
