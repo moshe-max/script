@@ -1389,35 +1389,53 @@ function sendHelpCard(message, userRole, roleLimits) {
 // 9. TESTING & DIAGNOSTIC FUNCTION
 // ====================================================================
 
-function testRoleConfiguration() {
+function testEndpointQualities() {
   const C = getConstants();
   
-  Logger.log("\n" + "=".repeat(60));
-  Logger.log("ROLE CONFIGURATION TEST");
-  Logger.log("=".repeat(60) + "\n");
+  Logger.log("\n" + "=".repeat(70));
+  Logger.log("TESTING ENDPOINT AVAILABLE QUALITIES");
+  Logger.log("=".repeat(70) + "\n");
   
-  for (const [role, limits] of Object.entries(C.ROLE_LIMITS)) {
-    const downloads = limits.downloads === Infinity ? 'Unlimited' : limits.downloads;
-    const searches = limits.searches === Infinity ? 'Unlimited' : limits.searches;
+  try {
+    const response = UrlFetchApp.fetch(C.RAILWAY_ENDPOINT + "/quality-info", {
+      muteHttpExceptions: true
+    });
     
-    Logger.log(`Role: ${role.toUpperCase()}`);
-    Logger.log(`  Label: ${limits.label}`);
-    Logger.log(`  Downloads: ${downloads}`);
-    Logger.log(`  Searches: ${searches}`);
-    Logger.log(`  Max Results: ${limits.maxResults}`);
-    Logger.log(`  Quality: ${limits.quality}`);
-    Logger.log("");
+    if (response.getResponseCode() === 200) {
+      const data = JSON.parse(response.getContentText());
+      
+      Logger.log("✓ ENDPOINT CONNECTED SUCCESSFULLY\n");
+      Logger.log(`Service: ${data.service || "N/A"}`);
+      Logger.log(`Version: ${data.version || "N/A"}`);
+      Logger.log(`Default Quality: ${data.default_quality || "N/A"}\n`);
+      
+      Logger.log("Available Qualities:");
+      Logger.log("-".repeat(70));
+      
+      for (const [role, info] of Object.entries(data.available_qualities || {})) {
+        const status = info.enabled ? "✓ ENABLED" : "✗ DISABLED";
+        Logger.log(`${role.padEnd(20)} | ${info.label.padEnd(15)} | ${status.padEnd(12)} | Max: ${info.max_filesize_mb} MB`);
+      }
+      
+      Logger.log("\n" + "=".repeat(70));
+      Logger.log("SUMMARY");
+      Logger.log("=".repeat(70));
+      const totalRoles = Object.keys(data.available_qualities || {}).length;
+      const enabledRoles = Object.values(data.available_qualities || {}).filter(r => r.enabled).length;
+      Logger.log(`Total Roles: ${totalRoles}`);
+      Logger.log(`Enabled: ${enabledRoles}`);
+      Logger.log(`Disabled: ${totalRoles - enabledRoles}`);
+      Logger.log(`Backward Compatible: ${data.backward_compatible ? "Yes" : "No"}`);
+      Logger.log("\n");
+      
+    } else {
+      Logger.log(`✗ ENDPOINT ERROR: Status ${response.getResponseCode()}`);
+      Logger.log(`Response: ${response.getContentText()}`);
+    }
+  } catch (e) {
+    Logger.log(`✗ CONNECTION FAILED: ${e.toString()}`);
+    Logger.log(`Check endpoint URL: ${C.RAILWAY_ENDPOINT}`);
   }
-  
-  Logger.log("=".repeat(60));
-  Logger.log("SUMMARY");
-  Logger.log("=".repeat(60));
-  Logger.log(`Total Roles: ${Object.keys(C.ROLE_LIMITS).length}`);
-  Logger.log(`Default Role: ${C.DEFAULT_ROLE}`);
-  Logger.log(`Usage Window: ${C.USAGE_WINDOW_MINUTES} minutes (24 hours)`);
-  Logger.log(`Max Video Size: ${C.MAX_VIDEO_SIZE_MB} MB`);
-  Logger.log(`Email Attachment Size: ${C.EMAIL_ATTACHMENT_SIZE_MB} MB`);
-  Logger.log("\n");
 }
 
-// Run this function from Apps Script console to test: testRoleConfiguration()
+// Run this function from Apps Script console to test: testEndpointQualities()
