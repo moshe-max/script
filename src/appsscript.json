@@ -1,19 +1,17 @@
 {
-  "timeZone": "Asia/Jerusalem",
+  "timeZone": "America/New_York",
+  "dependencies": {
+    "enabledAdvancedServices": []
+  },
   "exceptionLogging": "STACKDRIVER",
   "runtimeVersion": "V8",
   "oauthScopes": [
-    "https://www.googleapis.com/auth/gmail.addons.execute",
-    "https://www.googleapis.com/auth/script.external_request"
-  ],
-  "gmail": {
-    "name": "Gemini AI Chatbot",
-    "logoUrl": "https://www.gstatic.com/images/branding/product/1x/gmail_48dp.png",
-    "contextualTriggers": [
-      {
-        "unconditional": {},
-        "onTriggerFunction": "onGmailMessageOpen"
-      }
-    ]
-  }
+    "https://www.googleapis.com/auth/gmail.modify",
+    "https://www.googleapis.com/auth/gmail.compose",
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/script.external_request",
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive",
+    "https://www.googleapis.com/auth/drive.file"
+  ]
 }

@@ -1,328 +1,1037 @@
 /**
- * Gemini AI Chat – Premium Edition
- * Gmail Add-on fully fixed for Gemini v1beta
+ * Google Apps Script for a YouTube Downloader/Search Bot via Gmail.
+ *
+ * This script processes unread emails with the subject "bt".
+ * 1. If the email body contains YouTube links, it downloads the videos,
+ *    uploads them to Google Drive, and replies with shareable links.
+ * 2. If no links are found, it performs a YouTube search and replies with interactive results.
+ *
+ * FEATURES:
+ * - Implements role-based usage limits (admin, pro user, user, guest).
+ * - Reads user roles from the "User Roles" sheet.
+ * - Saves videos to Google Drive instead of email attachments
  */
 
-// ===================== CONSTANTS =====================
-const GEMINI_MODEL = 'gemini-2.5-flash';
-const MAX_HISTORY = 50;
-const HISTORY_KEY = 'CHAT_HISTORY';
-const SETTINGS_KEY = 'CHAT_SETTINGS';
+// ====================================================================
+// 1. CONSTANTS & CONFIGURATION
+// ====================================================================
 
-const SYSTEM_PROMPTS = {
-  assistant: 'You are a helpful, friendly AI assistant. Provide clear, concise, and accurate responses.',
-  creative: 'You are a creative writing assistant. Be imaginative, engaging, and helpful. Write in an expressive style.',
-  technical: 'You are a technical expert. Provide detailed, accurate technical explanations with code examples when relevant.',
-  tutor: 'You are a patient tutor. Explain concepts clearly, use analogies, and help the user understand step-by-step.',
-  concise: 'Be extremely concise and direct. Answer in 1-2 sentences when possible.'
-};
+/**
+ * Retrieves configuration values and role-based limits.
+ */
+function getConstants() {
+  const YOUTUBE_API_KEY = PropertiesService.getScriptProperties().getProperty('YOUTUBE_API_KEY');
 
-// ===================== ENTRY POINT =====================
-function onGmailMessageOpen() {
-  return buildMainUI_();
+  return {
+    RAILWAY_ENDPOINT: "https://yt-mail.onrender.com",
+    YOUTUBE_API_BASE: "https://www.googleapis.com/youtube/v3",
+    LOG_SPREADSHEET_ID: "1vxiRaNLMW5mtlrneiRBnzx0PKgvKJAmGqVnALKH6vFA",
+    DRIVE_FOLDER_NAME: "YouTube Bot Downloads", // Folder name in Google Drive
+    MAX_VIDEO_SIZE_MB: 100, // Increased limit since we're not limited by email attachment size
+
+    // USAGE LIMITS (Role-based)
+    ROLE_LIMITS: {
+      'admin': { downloads: Infinity, searches: Infinity, maxResults: 15, label: 'Admin' }, 
+      'pro plus': { downloads: 25, searches: 25, maxResults: 15, label: 'Pro Plus User' },
+      'pro user': { downloads: 12, searches: 12, maxResults: 12, label: 'Pro User' },
+      'user': { downloads: 5, searches: 5, maxResults: 5, label: 'Standard User' },
+      'guest': { downloads: 1, searches: 5, maxResults: 5, label: 'Guest' }
+    },
+    DEFAULT_ROLE: 'guest',
+    USAGE_WINDOW_MINUTES: 1440, // 24 hours
+    USAGE_SHEET_NAME: "Usage & Limits",
+    ROLES_SHEET_NAME: "User Roles",
+    
+    STYLE: `<style>@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');</style>`,
+    YOUTUBE_API_KEY: YOUTUBE_API_KEY
+  };
 }
 
-// ===================== MAIN UI =====================
-function buildMainUI_() {
-  const settings = loadSettings_();
-  return CardService.newCardBuilder()
-    .setHeader(buildHeader_())
-    .addSection(buildModeSelector_(settings.mode || 'assistant'))
-    .addSection(buildChatSection_())
-    .addSection(buildInputSection_(settings))
-    .addSection(buildSettingsSection_(settings))
-    .build();
-}
+// ====================================================================
+// 2. MAIN EXECUTION FUNCTION (Trigger this function)
+// ====================================================================
 
-function buildHeader_() {
-  return CardService.newCardHeader()
-    .setTitle('💬 Gemini AI Chat')
-    .setSubtitle('Powered by Gemini 2.5 Flash | Smart • Fast • Flexible');
-}
+function processYouTubeEmails() {
+  Logger.log("=== Bot started ===");
 
-// ===================== MODE SELECTOR =====================
-function buildModeSelector_(currentMode) {
-  const section = CardService.newCardSection().setHeader('Mode');
-  const modes = [
-    { id: 'assistant', icon: '🤖', label: 'Assistant' },
-    { id: 'creative', icon: '✨', label: 'Creative' },
-    { id: 'technical', icon: '⚙️', label: 'Technical' },
-    { id: 'tutor', icon: '📚', label: 'Tutor' },
-    { id: 'concise', icon: '⚡', label: 'Concise' }
-  ];
+  const threads = GmailApp.search('is:unread subject:bt');
+  Logger.log(`Found ${threads.length} unread thread(s) with "bt" in subject`);
 
-  const buttons = modes.map(mode => {
-    const action = CardService.newAction()
-      .setFunctionName('setMode_')
-      .setParameters({ mode: mode.id });
+  for (const thread of threads) {
+    const messages = thread.getMessages();
+    const message = messages[messages.length - 1]; 
 
-    const btn = CardService.newTextButton()
-      .setText(`${mode.icon} ${mode.label}`)
-      .setOnClickAction(action);
+    if (!message.isUnread()) continue;
 
-    btn.setTextButtonStyle(currentMode === mode.id ? CardService.TextButtonStyle.FILLED : CardService.TextButtonStyle.TEXT);
-    return btn;
-  });
+    const sender = message.getFrom();
+    const subject = message.getSubject();
+    
+    const bodyPlain = message.getPlainBody().trim();
+    const bodyHtml = message.getBody(); 
+    const combinedBody = bodyPlain + "\n\n" + bodyHtml;
 
-  section.addWidget(CardService.newButtonSet().addButton(buttons[0]).addButton(buttons[1]));
-  section.addWidget(CardService.newButtonSet().addButton(buttons[2]).addButton(buttons[3]).addButton(buttons[4]));
-  return section;
-}
+    Logger.log(`Processing → From: ${sender} | Subject: ${subject}`);
+    
+    const youtubeRegex = /(https?:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)[A-Za-z0-9_-]{11}[^\s<>"'\]]*)/g;
+    
+    const links = [...new Set((combinedBody.match(youtubeRegex) || []))];
 
-// ===================== CHAT HISTORY SECTION =====================
-function buildChatSection_() {
-  const section = CardService.newCardSection().setHeader('💬 Conversation');
-  const history = loadHistory_();
-
-  if (!history.length) {
-    section.addWidget(CardService.newTextParagraph().setText('👋 Select a mode and start chatting!'));
-    return section;
-  }
-
-  const CHUNK_SIZE = 500;
-  let lastRole = null;
-  let buffer = '';
-
-  history.forEach(msg => {
-    const roleLabel = msg.role === 'user' ? '👤 You' : '🤖 Gemini';
-
-    if (roleLabel === lastRole) {
-      buffer += '\n' + msg.text;
+    Logger.log(`[DEBUG] Extracted Links Count: ${links.length}`);
+    if (links.length > 0) {
+      Logger.log(`[DEBUG] Links found: ${links.join(' | ')}`);
+      handleDirectLinks(message, thread, links, sender);
     } else {
-      if (buffer) {
-        for (let i = 0; i < buffer.length; i += CHUNK_SIZE) {
-          section.addWidget(
-            CardService.newDecoratedText()
-              .setTopLabel(lastRole)
-              .setText(buffer.substring(i, i + CHUNK_SIZE))
-              .setWrapText(true)
-          );
-        }
-      }
-      buffer = msg.text;
-      lastRole = roleLabel;
+      Logger.log(`[DEBUG] No links found. Using Plain Body as Search Query: "${bodyPlain}"`);
+      handleSearchQuery(message, thread, bodyPlain, sender);
     }
+
+    thread.markRead();
+  }
+
+  Logger.log("=== Bot finished ===\n");
+}
+
+// ====================================================================
+// 3. DRIVE MANAGEMENT FUNCTIONS
+// ====================================================================
+
+/**
+ * Gets or creates the YouTube Bot Downloads folder in Google Drive
+ */
+function getOrCreateDriveFolder() {
+  const C = getConstants();
+  const folders = DriveApp.getFoldersByName(C.DRIVE_FOLDER_NAME);
+  
+  if (folders.hasNext()) {
+    return folders.next();
+  } else {
+    const newFolder = DriveApp.createFolder(C.DRIVE_FOLDER_NAME);
+    log(`Created new Drive folder: ${C.DRIVE_FOLDER_NAME}`);
+    return newFolder;
+  }
+}
+
+/**
+ * Uploads a blob to Google Drive and returns the shareable link
+ */
+function uploadToDrive(blob, fileName) {
+  try {
+    const folder = getOrCreateDriveFolder();
+    const file = folder.createFile(blob.setName(fileName));
+    
+    // Set sharing to anyone with the link can view
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    
+    const shareableLink = file.getUrl();
+    log(`Uploaded to Drive: ${fileName}`);
+    
+    return {
+      success: true,
+      link: shareableLink,
+      fileId: file.getId(),
+      size: blob.getBytes().length
+    };
+  } catch (e) {
+    log(`Drive upload failed: ${e.toString()}`);
+    return {
+      success: false,
+      error: e.toString()
+    };
+  }
+}
+
+// ====================================================================
+// 4. CORE HANDLERS
+// ====================================================================
+
+/**
+ * Handles emails containing direct YouTube links by downloading and uploading to Drive.
+ */
+function handleDirectLinks(message, thread, links, sender) {
+  const C = getConstants();
+  
+  if (!C.YOUTUBE_API_KEY) {
+    sendApiKeyMissingReply(message, "Download Request");
+    return;
+  }
+  
+  const userRole = getUserRole(sender);
+  const roleLimits = C.ROLE_LIMITS[userRole];
+
+  // --- USAGE CHECK & LIMIT ---
+  const usageCheck = checkAndIncrementUsage(sender, 'download', links.length, userRole, roleLimits);
+  if (!usageCheck.allowed) {
+    sendLimitExceededReply(message, usageCheck, userRole, roleLimits);
+    logToSheet({
+      sender: sender,
+      requestType: "Direct Links",
+      queryOrUrls: links.join(", "),
+      actionDetail: `Rejected: ${usageCheck.message} (Role: ${userRole})`,
+      status: "LIMIT EXCEEDED"
+    });
+    return;
+  }
+
+  log(`Found ${links.length} direct YouTube link(s). Role: ${userRole}`);
+  
+  logToSheet({
+    sender: sender,
+    requestType: "Direct Links",
+    queryOrUrls: links.join(", "),
+    actionDetail: `${links.length} links requested (Role: ${userRole})`,
+    status: "Request Started"
   });
 
-  if (buffer) {
-    for (let i = 0; i < buffer.length; i += CHUNK_SIZE) {
-      section.addWidget(
-        CardService.newDecoratedText()
-          .setTopLabel(lastRole)
-          .setText(buffer.substring(i, i + CHUNK_SIZE))
-          .setWrapText(true)
-      );
+  const videoResults = [];
+  let totalSizeMB = 0;
+  let successCount = 0;
+
+  for (const url of links) {
+    const videoId = url.includes("v=") ? url.split("v=")[1].substring(0, 11) : url.split("/").pop().substring(0, 11);
+    log(`Attempting to download ${videoId}...`);
+
+    try {
+      // 1. Download Video Blob
+      const downloadUrl = `${C.RAILWAY_ENDPOINT}/download?url=${encodeURIComponent(url)}`;
+      const response = UrlFetchApp.fetch(downloadUrl, { muteHttpExceptions: true });
+
+      if (response.getResponseCode() !== 200) {
+        throw new Error(`Download failed with status code ${response.getResponseCode()}`);
+      }
+
+      const blob = response.getBlob();
+      const sizeMB = Math.round(blob.getBytes().length / (1024 * 1024) * 10) / 10;
+
+      // 2. Get Video Metadata from YouTube API
+      const infoUrl = `${C.YOUTUBE_API_BASE}/videos?part=snippet,statistics,contentDetails&id=${videoId}&key=${C.YOUTUBE_API_KEY}`;
+      const infoRes = UrlFetchApp.fetch(infoUrl);
+      const infoData = JSON.parse(infoRes.getContentText()).items[0];
+
+      if (!infoData) throw new Error("Video metadata not found.");
+
+      const title = (infoData.snippet.title || "Unknown Video").replace(/[\\/:*?"<>|]/g, "_").substring(0, 100);
+      const channel = infoData.snippet.channelTitle || "Unknown Channel";
+      const views = Number(infoData.statistics.viewCount || 0).toLocaleString();
+      const uploadDate = Utilities.formatDate(new Date(infoData.snippet.publishedAt), "GMT", "MMM d, yyyy");
+      const thumb = infoData.snippet.thumbnails.high.url;
+      
+      const isoDuration = infoData.contentDetails?.duration;
+      const duration = formatDuration(isoDuration);
+
+      const cleanFileName = `${title} - ${channel}.mp4`;
+
+      // 3. Upload to Drive
+      if (sizeMB <= C.MAX_VIDEO_SIZE_MB) {
+        const driveResult = uploadToDrive(blob, cleanFileName);
+        
+        if (driveResult.success) {
+          totalSizeMB += sizeMB;
+          successCount++;
+
+          videoResults.push({
+            success: true,
+            title,
+            channel,
+            views,
+            uploadDate,
+            thumb,
+            cleanFileName,
+            sizeMB,
+            duration,
+            driveLink: driveResult.link
+          });
+          
+          logToSheet({
+            sender: sender,
+            requestType: "Direct Links",
+            videoId: videoId,
+            title: cleanFileName,
+            actionDetail: "Uploaded to Drive",
+            sizeMb: sizeMB,
+            status: "Download Success"
+          });
+        } else {
+          throw new Error(`Drive upload failed: ${driveResult.error}`);
+        }
+      } else {
+        videoResults.push({
+          success: false,
+          error: `Video too large (${sizeMB} MB exceeds ${C.MAX_VIDEO_SIZE_MB} MB limit)`
+        });
+        
+        logToSheet({
+          sender: sender,
+          requestType: "Direct Links",
+          videoId: videoId,
+          title: title,
+          actionDetail: `Skipped: Size limit exceeded`,
+          sizeMb: sizeMB,
+          status: "Download Skipped"
+        });
+      }
+
+    } catch (e) {
+      videoResults.push({
+        success: false,
+        url: url,
+        error: e.toString()
+      });
+      
+      log(`Failed ${videoId}: ${e.toString()}`);
+      
+      logToSheet({
+        sender: sender,
+        requestType: "Direct Links",
+        videoId: videoId,
+        actionDetail: `URL: ${url} | Error: ${e.toString()}`,
+        status: "Download Failed"
+      });
     }
   }
 
-  return section;
+  // 4. Send Reply with Drive Links
+  const htmlBody = buildDriveDownloadReplyHtml(videoResults);
+  message.reply("Your videos from YouTube (Drive Links)", { htmlBody: C.STYLE + htmlBody });
+
+  // Summary log
+  logToSheet({
+    sender: sender,
+    requestType: "Direct Links",
+    actionDetail: `Uploaded ${successCount} videos (${(totalSizeMB).toFixed(1)} MB) of ${links.length} total to Drive`,
+    sizeMb: totalSizeMB,
+    status: "Batch Summary"
+  });
 }
 
+/**
+ * Handles search queries in the email body by calling the YouTube Search API.
+ */
+function handleSearchQuery(message, thread, originalBody, sender) {
+  const C = getConstants();
+  let query = extractNewQuery(originalBody);
+  const userRole = getUserRole(sender);
+  const roleLimits = C.ROLE_LIMITS[userRole];
+  
+  const maxResults = roleLimits.maxResults; 
 
+  if (query.toLowerCase() === "test_api_key") {
+    testApiKeyStatus(message, sender, C.YOUTUBE_API_KEY);
+    return;
+  }
 
+  if (!C.YOUTUBE_API_KEY) {
+    sendApiKeyMissingReply(message, "Search Request");
+    return;
+  }
 
+  if (["info", "help", "how", "instructions", "?"].includes(query.toLowerCase())) {
+    log(`User requested help. Role: ${userRole}`);
+    sendHelpCard(message, userRole, roleLimits);
+    
+    logToSheet({
+      sender: sender,
+      requestType: "Smart Search",
+      queryOrUrls: query,
+      actionDetail: `Instructions sent (Role: ${userRole})`,
+      status: "Help Requested"
+    });
+    return;
+  }
+  
+  const usageCheck = checkAndIncrementUsage(sender, 'search', 1, userRole, roleLimits);
+  if (!usageCheck.allowed) {
+    sendLimitExceededReply(message, usageCheck, userRole, roleLimits);
+    logToSheet({
+      sender: sender,
+      requestType: "Smart Search",
+      queryOrUrls: query,
+      actionDetail: `Rejected: ${usageCheck.message} (Role: ${userRole})`,
+      status: "LIMIT EXCEEDED"
+    });
+    return;
+  }
+  
+  logToSheet({
+    sender: sender,
+    requestType: "Smart Search",
+    queryOrUrls: query,
+    actionDetail: `Search for: "${query}" (Role: ${userRole}, Max Results: ${maxResults})`,
+    status: "Request Started"
+  });
 
-// ===================== INPUT SECTION =====================
-function buildInputSection_(settings) {
-  const section = CardService.newCardSection().setHeader('📝 Message');
-  section.addWidget(CardService.newTextInput()
-    .setFieldName('prompt')
-    .setTitle('Type here')
-    .setMultiline(true)
-    .setHint(`Message in ${settings.mode || 'assistant'} mode...`)
-  );
+  log(`Smart search → extracted query: "${query}"`);
 
-  const sendBtn = CardService.newTextButton()
-    .setText('📤 Send Message')
-    .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
-    .setOnClickAction(CardService.newAction().setFunctionName('handleSend_'));
-
-  const copyBtn = CardService.newTextButton()
-    .setText('📋 Copy Last')
-    .setTextButtonStyle(CardService.TextButtonStyle.TEXT)
-    .setOnClickAction(CardService.newAction().setFunctionName('copyLastMessage_'));
-
-  const clearBtn = CardService.newTextButton()
-    .setText('🗑️ Clear')
-    .setTextButtonStyle(CardService.TextButtonStyle.TEXT)
-    .setOnClickAction(CardService.newAction().setFunctionName('handleClear_'));
-
-  section.addWidget(CardService.newButtonSet().addButton(sendBtn).addButton(copyBtn).addButton(clearBtn));
-  return section;
-}
-
-// ===================== SETTINGS SECTION =====================
-function buildSettingsSection_(settings) {
-  const section = CardService.newCardSection().setHeader('⚙️ Options');
-  section.addWidget(CardService.newTextParagraph().setText('💾 Total messages: ' + (loadHistory_().length || 0)));
-  return section;
-}
-
-// ===================== EVENT HANDLERS =====================
-function setMode_(e) {
-  const settings = loadSettings_();
-  settings.mode = e.parameters.mode;
-  saveSettings_(settings);
-  return refresh_();
-}
-
-function handleSend_(e) {
-  const text = (e.formInput?.prompt || '').trim();
-  if (!text) return notify_('✏️ Please enter a message.', CardService.NotificationType.INFO);
-
-  const settings = loadSettings_();
-  const mode = settings.mode || 'assistant';
-  let history = loadHistory_();
-
-  history.push({ role: 'user', text: text, timestamp: new Date().toISOString(), mode: mode });
-  const reply = callGemini_(history, mode);
-
-  history.push({ role: 'model', text: reply, timestamp: new Date().toISOString(), mode: mode });
-  if (history.length > MAX_HISTORY) history = history.slice(-MAX_HISTORY);
-
-  saveHistory_(history);
-  return refresh_();
-}
-
-function handleClear_() {
-  PropertiesService.getUserProperties().deleteProperty(HISTORY_KEY);
-  return notify_('🗑️ Conversation cleared!', CardService.NotificationType.INFO);
-}
-
-function copyLastMessage_() {
-  const history = loadHistory_();
-  if (!history.length) return notify_('ℹ️ No messages to copy.', CardService.NotificationType.INFO);
-
-  const lastMsg = history[history.length - 1];
-  copyToClipboard_(lastMsg.role === 'user' && history.length > 1 ? history[history.length - 2].text : lastMsg.text);
-  return notify_('✅ Copied to clipboard (check console log)', CardService.NotificationType.INFO);
-}
-
-// ===================== GEMINI API CALL (v1beta – content only) =====================
-function callGemini_(history, mode) {
-  const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
-  if (!apiKey) return '❌ GEMINI_API_KEY not set.';
+  const searchUrl = `${C.YOUTUBE_API_BASE}/search?part=snippet&maxResults=${maxResults}&q=${encodeURIComponent(query)}&type=video&key=${C.YOUTUBE_API_KEY}`;
 
   try {
-    // 1) System prompt + conversation -> contents format
-    const systemPrompt = SYSTEM_PROMPTS[mode] || SYSTEM_PROMPTS.assistant;
-    const contents = [];
-
-    // Push system prompt as first "contents" item with parts array
-    contents.push({
-      parts: [{ text: systemPrompt }]
-    });
-
-    // Append conversation: each element becomes a contents item with parts
-    (history || []).forEach(msg => {
-      contents.push({
-        parts: [{ text: msg.text }]
+    const searchResponse = UrlFetchApp.fetch(searchUrl);
+    const searchData = JSON.parse(searchResponse.getContentText());
+    let items = searchData.items || [];
+    
+    const videoIds = items.map(item => item.id.videoId).join(',');
+    
+    if (videoIds.length > 0) {
+      const videoInfoUrl = `${C.YOUTUBE_API_BASE}/videos?part=statistics,contentDetails&id=${videoIds}&key=${C.YOUTUBE_API_KEY}`;
+      const infoResponse = UrlFetchApp.fetch(videoInfoUrl);
+      const infoData = JSON.parse(infoResponse.getContentText());
+      
+      const statsMap = {};
+      infoData.items.forEach(infoItem => {
+        statsMap[infoItem.id] = {
+          statistics: infoItem.statistics,
+          contentDetails: infoItem.contentDetails
+        };
       });
+      
+      items = items.map(item => {
+        const videoId = item.id.videoId;
+        const videoInfo = statsMap[videoId] || {};
+        item.statistics = videoInfo.statistics || {}; 
+        item.contentDetails = videoInfo.contentDetails || {};
+        return item;
+      });
+    }
+
+    log(`Search returned ${items.length} results`);
+
+    const html = buildSearchResultsHtml(items, message.getTo(), query);
+    message.reply(`Search results for: "${query}"`, { htmlBody: C.STYLE + html });
+
+    logToSheet({
+      sender: sender,
+      requestType: "Smart Search",
+      queryOrUrls: query,
+      actionDetail: `${items.length} results returned`,
+      status: "Search Success"
     });
-
-    // 2) Payload: note the top-level key is 'contents' (array)
-    const payload = {
-      contents: contents
-    };
-
-    // 3) Send request
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
-    const options = {
-      method: 'post',
-      contentType: 'application/json',
-      payload: JSON.stringify(payload),
-      muteHttpExceptions: true,
-      timeout: 60
-    };
-
-    const resp = UrlFetchApp.fetch(url, options);
-    const status = resp.getResponseCode();
-    const body = resp.getContentText();
-
-    let data;
-    try { data = JSON.parse(body); }
-    catch (e) {
-      console.error('Failed to parse JSON from Gemini:', body);
-      return '❌ Failed to parse response from Gemini API.';
+  } catch (e) {
+    if (e.message.includes("returned code 400") && e.message.includes("API key not valid")) {
+       log(`Search failed: API Key Error (400)`);
+       sendApiKeyMissingReply(message, "Search Request", true);
+       logToSheet({
+          sender: sender,
+          requestType: "Smart Search",
+          queryOrUrls: query,
+          actionDetail: `Error: API Key Invalid (400)`,
+          status: "Search Failed"
+       });
+       return;
     }
-
-    if (status !== 200) {
-      const msg = data?.error?.message || JSON.stringify(data).slice(0, 300);
-      console.error('Gemini API returned error:', status, msg);
-      return `❌ API Error: ${msg}`;
-    }
-
-    // 4) Extract reply — handle several response shapes used in examples
-    let reply = null;
-
-    // common shapes used historically:
-    // data.candidates[0].content[0].parts[0].text
-    // data.candidates[0].content.parts[0].text
-    // data.candidates[0].content[0].text
-    // data.candidates[0].content.text
-    try {
-      const c0 = data.candidates?.[0];
-      if (c0) {
-        // try nested content -> parts -> text
-        reply =
-          c0.content?.[0]?.parts?.[0]?.text ||
-          c0.content?.parts?.[0]?.text ||
-          c0.content?.[0]?.text ||
-          c0.content?.text ||
-          c0.output?.[0]?.text || // defensive
-          null;
-      }
-    } catch (e) {
-      reply = null;
-    }
-
-    if (!reply) {
-      console.warn('No text found in Gemini response, returning raw candidate for debugging.', JSON.stringify(data).slice(0,1000));
-      // fallback: return stringified candidate(s) so user sees what came back
-      return '⚠️ Empty text in response. Raw candidate: ' + (JSON.stringify(data.candidates || data).slice(0,1000));
-    }
-
-    return reply;
-
-  } catch (err) {
-    console.error('callGemini_ exception:', err);
-    return `❌ Error: ${err.toString()}`;
+    
+    log(`Search failed: ${e.message}`);
+    logToSheet({
+      sender: sender,
+      requestType: "Smart Search",
+      queryOrUrls: query,
+      actionDetail: `Error: ${e.message}`,
+      status: "Search Failed"
+    });
+    message.reply("Search failed — an unexpected error occurred. Check the logs for details.");
   }
 }
 
-// ===================== STORAGE =====================
-function loadHistory_() {
-  const data = PropertiesService.getUserProperties().getProperty(HISTORY_KEY);
-  return data ? JSON.parse(data) : [];
+/**
+ * Tests the status of the YouTube API key.
+ */
+function testApiKeyStatus(message, sender, apiKey) {
+    const C = getConstants();
+    
+    let status, details, color, icon;
+    
+    if (!apiKey) {
+        status = "Key Missing";
+        details = "The 'YOUTUBE_API_KEY' property is not set in Script Properties. Please add your key.";
+        color = "#ff6600";
+        icon = "⚠️";
+    } else {
+        const testUrl = `${C.YOUTUBE_API_BASE}/search?part=id&maxResults=1&q=test&key=${apiKey}`;
+        
+        try {
+            const response = UrlFetchApp.fetch(testUrl, { muteHttpExceptions: true });
+            const responseCode = response.getResponseCode();
+            
+            if (responseCode === 200) {
+                status = "Key Valid & Working";
+                details = "The API key successfully connected and performed a test search. Your bot should be fully operational!";
+                color = "#4CAF50";
+                icon = "✅";
+            } else if (responseCode === 400) {
+                status = "Key Invalid/Unauthenticated (400)";
+                details = "The YouTube API rejected the key. Check if the key is correct and if the 'YouTube Data API v3' is enabled in your Google Cloud Console.";
+                color = "#F44336";
+                icon = "❌";
+            } else if (responseCode === 403) {
+                 status = "Forbidden (403)";
+                 details = "The key might be valid but restricted (e.g., IP address restrictions, quota exceeded, or billing issue). Check your API Console restrictions and quota.";
+                 color = "#F44336";
+                 icon = "🚫";
+            } else {
+                status = `API Test Failed (${responseCode})`;
+                details = `Received unexpected HTTP status code: ${responseCode}. Raw response: ${response.getContentText().substring(0, 100)}...`;
+                color = "#FF9800";
+                icon = "⚠️";
+            }
+        } catch (e) {
+            status = "Connection Error";
+            details = `Failed to connect to the Google API endpoint: ${e.toString()}`;
+            color = "#757575";
+            icon = "🔌";
+        }
+    }
+
+    const html = `
+      <div style="font-family:'Roboto',Arial,sans-serif; max-width:600px; margin:20px auto; padding:25px; background:#f5f5f5; color:#333; border:1px solid #ddd; border-radius:12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1);">
+        <h2 style="color:${color}; font-size:24px; margin-bottom:15px; border-bottom:2px solid #eee; padding-bottom:10px; text-align:center;">${icon} API Key Test Result ${icon}</h2>
+        <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee;">
+            <p style="font-size:16px; margin-bottom:10px;"><strong>Status:</strong> <span style="color:${color}; font-weight:bold;">${status}</span></p>
+            <p style="font-size:14px; line-height:1.5;"><strong>Details:</strong> ${details}</p>
+        </div>
+        <p style="font-size:12px; color:#777; margin-top:20px; text-align:center;">
+          Run this test again by sending an email with the subject "bt" and body: <code style="background:#f0f0f0; padding:2px 5px; border-radius:3px;">test_api_key</code>
+        </p>
+      </div>
+    `;
+
+    message.reply("YouTube API Key Status Check", { htmlBody: C.STYLE + html });
+    
+    logToSheet({
+      sender: sender,
+      requestType: "API Key Test",
+      queryOrUrls: "test_api_key",
+      actionDetail: `Key Status: ${status} | Details: ${details}`,
+      status: status
+    });
 }
 
-function saveHistory_(history) {
-  PropertiesService.getUserProperties().setProperty(HISTORY_KEY, JSON.stringify(history.slice(-MAX_HISTORY)));
+/**
+ * Sends a specific reply when the API Key is detected as missing or invalid.
+ */
+function sendApiKeyMissingReply(message, requestType, isInvalid = false) {
+    const C = getConstants();
+    const status = isInvalid ? "Invalid API Key" : "API Key Missing";
+    const details = isInvalid 
+        ? "The key in Script Properties is being rejected by the YouTube API (HTTP 400 error). Please verify the key's accuracy and ensure the 'YouTube Data API v3' service is enabled in your Google Cloud Console."
+        : "The 'YOUTUBE_API_KEY' property is not found in Script Properties. This key is required for all searches and for fetching video metadata during downloads.";
+    
+    const html = `
+      <div style="font-family:'Roboto',Arial,sans-serif; max-width:600px; margin:20px auto; padding:25px; background:#fff0f0; color:#c00; border:2px solid #c00; border-radius:12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1);">
+        <h2 style="color:#c00; font-size:24px; margin-bottom:15px; text-align:center;">⚠️ ${status}</h2>
+        <p style="font-size:16px; color:#333; line-height:1.6; margin-bottom:20px;">
+          Your recent **${requestType}** failed.
+        </p>
+        <div style="background:white; padding:15px; border-radius:8px; border:1px solid #fdd;">
+            <strong style="color:#c00; display:block; margin-bottom:5px;">Required Action:</strong>
+            <p style="font-size:14px; color:#555;">${details}</p>
+            <p style="font-size:14px; color:#555; margin-top:10px;">
+              To diagnose further, send an email with the subject "bt" and the body: <code style="background:#f0f0f0; padding:2px 5px; border-radius:3px;">test_api_key</code>
+            </p>
+        </div>
+      </div>
+    `;
+
+    message.reply("Action Blocked: API Key Error", { htmlBody: C.STYLE + html });
+    log(`Blocked request due to ${status}`);
 }
 
-function loadSettings_() {
-  const data = PropertiesService.getUserProperties().getProperty(SETTINGS_KEY);
-  return data ? JSON.parse(data) : {};
+// ====================================================================
+// 5. USAGE AND ROLE TRACKING FUNCTIONS
+// ====================================================================
+
+function getUserRolesSheet() {
+  const C = getConstants();
+  const ss = SpreadsheetApp.openById(C.LOG_SPREADSHEET_ID);
+  let sheet = ss.getSheetByName(C.ROLES_SHEET_NAME);
+  
+  const header = ["Email", "Role", "Assigned Date", "Notes"];
+  
+  if (!sheet) {
+    sheet = ss.insertSheet(C.ROLES_SHEET_NAME);
+    sheet.appendRow(header);
+    sheet.setFrozenRows(1);
+    sheet.getRange(1, 1, 1, header.length).setFontWeight("bold").setBackground("#33A852").setFontColor("white");
+    
+    sheet.appendRow(["admin@example.com", "admin", new Date(), "Full access"]);
+    sheet.appendRow(["proplus@company.com", "pro plus", new Date(), "Pro Plus subscription"]);
+    sheet.appendRow(["pro@company.com", "pro user", new Date(), "Premium subscription"]);
+    sheet.getRange(2, 1, 3, 1).setNumberFormat("@");
+    
+    log(`Created new sheet: ${C.ROLES_SHEET_NAME}. Please populate it with user emails and roles.`);
+  }
+  return sheet;
 }
 
-function saveSettings_(settings) {
-  PropertiesService.getUserProperties().setProperty(SETTINGS_KEY, JSON.stringify(settings));
+function getUserRole(sender) {
+  const C = getConstants();
+  const sheet = getUserRolesSheet();
+  const data = sheet.getDataRange().getValues();
+  const defaultRole = C.DEFAULT_ROLE;
+  
+  for (let i = 1; i < data.length; i++) {
+    const email = (data[i][0] || "").trim().toLowerCase();
+    const role = (data[i][1] || "").trim().toLowerCase();
+    
+    if (email === sender.trim().toLowerCase()) {
+      if (C.ROLE_LIMITS.hasOwnProperty(role)) {
+        return role;
+      } else {
+        log(`Warning: Role "${role}" for ${sender} is invalid. Defaulting to "${defaultRole}".`);
+        return defaultRole;
+      }
+    }
+  }
+  
+  return defaultRole;
 }
 
-// ===================== UI HELPERS =====================
-function refresh_() {
-  return CardService.newActionResponseBuilder()
-    .setNavigation(CardService.newNavigation().updateCard(buildMainUI_()))
-    .build();
+function getUsageSheet() {
+  const C = getConstants();
+  const ss = SpreadsheetApp.openById(C.LOG_SPREADSHEET_ID);
+  let sheet = ss.getSheetByName(C.USAGE_SHEET_NAME);
+  
+  const header = ["Email", "Last Update", "Downloads Count", "Searches Count", "Last Download Request", "Last Search Request"];
+  
+  if (!sheet) {
+    sheet = ss.insertSheet(C.USAGE_SHEET_NAME);
+    sheet.appendRow(header);
+    sheet.setFrozenRows(1);
+    sheet.getRange(1, 1, 1, header.length).setFontWeight("bold").setBackground("#4CAF50").setFontColor("white");
+    sheet.getRange(2, 1, sheet.getMaxRows(), header.length).setNumberFormat("@");
+  }
+  return sheet;
 }
 
-function notify_(msg, type = CardService.NotificationType.INFO) {
-  return CardService.newActionResponseBuilder()
-    .setNotification(CardService.newNotification().setText(msg).setType(type))
-    .setNavigation(CardService.newNavigation().updateCard(buildMainUI_()))
-    .build();
+function getUsageData(sender) {
+  const sheet = getUsageSheet();
+  const data = sheet.getDataRange().getValues();
+  
+  for (let i = 1; i < data.length; i++) {
+    if ((data[i][0] || "").trim().toLowerCase() === sender.trim().toLowerCase()) {
+      return {
+        row: i + 1,
+        data: data[i]
+      };
+    }
+  }
+  return null;
 }
 
-function truncateText_(text, maxLen) { return text.length <= maxLen ? text : text.substring(0, maxLen) + '...'; }
-function formatTime_(ts) { const d = new Date(ts); return d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0'); }
-function copyToClipboard_(text) { console.log('Copy placeholder:', text); }
+function checkAndIncrementUsage(sender, type, count, userRole, roleLimits) {
+  const C = getConstants();
+  const sheet = getUsageSheet();
+  const now = new Date();
+  
+  let usageRecord = getUsageData(sender);
+  let row = -1;
+  let downloads = 0;
+  let searches = 0;
+  let lastUpdate = now;
+  
+  const MAX_LIMIT = (type === 'download' ? roleLimits.downloads : roleLimits.searches);
+  const COUNT_INDEX = (type === 'download' ? 2 : 3);
+  const LAST_REQUEST_INDEX = (type === 'download' ? 4 : 5);
+  
+  if (userRole === 'admin') {
+      if (usageRecord) {
+          row = usageRecord.row;
+          sheet.getRange(row, 2).setValue(now);
+      } else {
+           row = sheet.getLastRow() + 1;
+           const newRowData = [
+                sender, 
+                now, 
+                0,
+                0,
+                type === 'download' ? now : null, 
+                type === 'search' ? now : null,  
+            ];
+           sheet.appendRow(newRowData);
+      }
+      return {
+          allowed: true,
+          message: "Admin: Usage is unlimited.",
+          currentDownloads: 0,
+          currentSearches: 0,
+      };
+  }
+
+  if (usageRecord) {
+    row = usageRecord.row;
+    
+    downloads = Number(usageRecord.data[2] || 0);
+    searches = Number(usageRecord.data[3] || 0);
+    
+    lastUpdate = usageRecord.data[1] instanceof Date ? usageRecord.data[1] : new Date(0); 
+
+    const timeSinceLastUpdateMs = now.getTime() - lastUpdate.getTime();
+    const windowMs = C.USAGE_WINDOW_MINUTES * 60 * 1000;
+
+    if (timeSinceLastUpdateMs > windowMs) {
+      downloads = 0;
+      searches = 0;
+      lastUpdate = now;
+    } else {
+      const currentCount = (type === 'download' ? downloads : searches);
+      if (currentCount + count > MAX_LIMIT) {
+        const timeRemainingMs = windowMs - timeSinceLastUpdateMs;
+        const minutes = Math.ceil(timeRemainingMs / 60000);
+        const retryWait = `${minutes} minute${minutes !== 1 ? 's' : ''}`;
+        
+        return {
+          allowed: false,
+          message: `You have reached your ${roleLimits.label} limit of ${MAX_LIMIT} ${type} requests in the last 24 hours (1 day).`,
+          retryWait: retryWait,
+          currentDownloads: downloads,
+          currentSearches: searches,
+        };
+      }
+    }
+  } else {
+    row = sheet.getLastRow() + 1;
+  }
+  
+  const newCount = (type === 'download' ? downloads : searches) + count;
+  
+  const newRowData = [
+    sender, 
+    lastUpdate, 
+    type === 'download' ? newCount : downloads, 
+    type === 'search' ? newCount : searches,
+    type === 'download' ? now : (usageRecord ? usageRecord.data[4] : null),
+    type === 'search' ? now : (usageRecord ? usageRecord.data[5] : null),
+  ];
+
+  if (usageRecord) {
+    sheet.getRange(row, 1, 1, newRowData.length).setValues([newRowData]);
+  } else {
+    sheet.appendRow(newRowData);
+  }
+  
+  sheet.getRange(row, 2).setValue(now);
+  
+  return {
+    allowed: true,
+    message: "Usage incremented.",
+    currentDownloads: type === 'download' ? newCount : downloads,
+    currentSearches: type === 'search' ? newCount : searches,
+  };
+}
+
+// ====================================================================
+// 6. GENERIC UTILITY FUNCTIONS
+// ====================================================================
+
+function log(msg) {
+  console.log(new Date().toISOString() + " | " + msg);
+}
+
+function sendLimitExceededReply(message, usageCheck, userRole, roleLimits) {
+  const C = getConstants();
+  
+  const displayDownloads = roleLimits.downloads === Infinity ? 'Unlimited' : roleLimits.downloads;
+  const displaySearches = roleLimits.searches === Infinity ? 'Unlimited' : roleLimits.searches;
+  const currentDownloads = roleLimits.downloads === Infinity ? 'N/A' : usageCheck.currentDownloads;
+  const currentSearches = roleLimits.searches === Infinity ? 'N/A' : usageCheck.currentSearches;
+
+  const html = `
+    <div style="font-family:'Roboto',Arial,sans-serif; max-width:600px; margin:20px auto; padding:25px; background:#fef3f3; color:#a00; border:1px solid #f00; border-radius:12px; text-align:center; box-shadow: 0 4px 10px rgba(0,0,0,0.1);">
+      <h2 style="color:#d00; font-size:24px; margin-bottom:10px;">🚫 Usage Limit Reached</h2>
+      <p style="font-size:16px; color:#555; line-height:1.6;">
+        ${usageCheck.message}
+      </p>
+      <div style="background:#fff; padding:15px; border-radius:8px; margin:20px 0;">
+          <strong style="display:block; font-size:18px; color:#111; margin-bottom:10px;">Your Current Role: ${roleLimits.label} (${userRole})</strong>
+          <ul style="list-style:none; padding:0; margin:0; text-align:left;">
+            <li style="margin-bottom:5px; color:#333;">Downloads Limit: <strong style="float:right;">${currentDownloads} / ${displayDownloads}</strong></li>
+            <li style="color:#333;">Searches Limit: <strong style="float:right;">${currentSearches} / ${displaySearches}</strong></li>
+            <li style="color:#333;">Search Results Max: <strong style="float:right;">${roleLimits.maxResults}</strong></li>
+          </ul>
+      </div>
+      <p style="font-size:14px; margin-top:20px; color:#777;">
+        You can try again in approximately <strong style="color:#333;">${usageCheck.retryWait}</strong>.
+      </p>
+    </div>
+  `;
+  message.reply("Action Rejected: Usage Limit Reached", { htmlBody: C.STYLE + html });
+}
+
+function logToSheet(logData) {
+  const C = getConstants();
+
+  try {
+    const ss = SpreadsheetApp.openById(C.LOG_SPREADSHEET_ID);
+    let sheet = ss.getSheetByName("Log");
+
+    const header = ["Timestamp", "User Email", "Request Type", "Query/URLs", "Video ID", "Title", "Action Detail", "Size (MB)", "Status"];
+
+    if (!sheet) {
+      sheet = ss.insertSheet("Log");
+      sheet.appendRow(header);
+      sheet.setFrozenRows(1);
+      sheet.getRange("A1:I1").setFontWeight("bold").setBackground("#4285f4").setFontColor("white"); 
+    }
+    
+    const row = [
+      new Date(),
+      logData.sender || "-",
+      logData.requestType || "-",
+      logData.queryOrUrls || "-",
+      logData.videoId || "-",
+      logData.title || "-",
+      logData.actionDetail || "-",
+      logData.sizeMb !== undefined && logData.sizeMb !== null ? logData.sizeMb.toFixed(2) : "-",
+      logData.status || "Unknown"
+    ];
+
+    sheet.appendRow(row);
+    console.log(`LOGGED to permanent sheet: ${logData.status} - ${logData.actionDetail || logData.requestType}`);
+  } catch (e) {
+    console.error("LOGGING FAILED:", e.toString());
+  }
+}
+
+function extractNewQuery(originalBody) {
+  let query = originalBody.trim();
+  const lines = query.split('\n');
+  let newLines = [];
+
+  for (let line of lines) {
+    line = line.trim();
+    if (line.startsWith('>') ||
+      line.startsWith('On ') && line.includes('wrote:') ||
+      line.startsWith('From:') ||
+      line.match(/^\d{4}\/\d{1,2}\/\d{1,2}.*<.*>/)) {
+      break;
+    }
+    if (line !== '') newLines.push(line);
+  }
+
+  query = newLines.join(' ').trim();
+
+  if (query === '') query = originalBody.trim();
+
+  return query;
+}
+
+function truncateTitle(title, limit = 60) {
+  const cleanTitle = title.replace(/[^\x20-\x7E]/g, '').trim(); 
+  
+  if (cleanTitle.length > limit) {
+    return cleanTitle.substring(0, limit) + '...';
+  }
+  return cleanTitle;
+}
+
+function formatDuration(isoDuration) {
+  if (!isoDuration) return 'N/A';
+  
+  const matches = isoDuration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+  if (!matches) return 'N/A';
+  
+  const hours = parseInt(matches[1] || 0);
+  const minutes = parseInt(matches[2] || 0);
+  const seconds = parseInt(matches[3] || 0);
+
+  let formatted = [];
+  
+  if (hours > 0) {
+    formatted.push(hours.toString());
+    formatted.push(Utilities.formatString('%02d', minutes));
+  } else {
+    formatted.push(minutes.toString());
+  }
+  
+  formatted.push(Utilities.formatString('%02d', seconds));
+  
+  return formatted.join(':');
+}
+
+// ====================================================================
+// 7. HTML TEMPLATE GENERATION (Drive Links)
+// ====================================================================
+
+function buildDriveDownloadReplyHtml(videoResults) {
+  let videoCards = '';
+  
+  videoResults.forEach(result => {
+    if (result.success) {
+      videoCards += `
+    <div style="background:white; border-radius:12px; overflow:hidden; margin:20px 0; box-shadow:0 4px 12px rgba(0,0,0,0.1);">
+      <div style="position:relative; background-color:#000;">
+        <img src="${result.thumb}" width="100%" style="max-width:100%; display:block; height:auto; border-bottom:3px solid #FF0000;">
+        <div style="position:absolute; bottom:8px; right:8px; background:rgba(0,0,0,0.8); color:white; padding:2px 6px; border-radius:4px; font-size:12px;">360p MP4</div>
+      </div>
+
+      <div style="padding:16px;">
+        <div style="font-weight:700; font-size:18px; color:#111; margin-bottom:8px; line-height:1.3;">${result.title}</div>
+        <div style="color:#606060; font-size:14px; margin:4px 0;">
+          <strong style="color:#000;">${result.channel}</strong> • Duration: ${result.duration} • ${result.views} views • ${result.uploadDate}
+        </div>
+        
+        <div style="margin-top:12px; padding-top:12px; border-top:1px solid #eee;">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <strong style="color:#0f9d58; font-size:15px;">✅ Uploaded to Drive</strong>
+            <span style="color:#555; font-size:13px;">${result.sizeMB} MB</span>
+          </div>
+          <p style="margin:8px 0 0; color:#333; font-size:14px;">File: <strong>${result.cleanFileName}</strong></p>
+          
+          <a href="${result.driveLink}" 
+             style="display:inline-block; margin-top:12px; background:#4285f4; color:white; padding:10px 20px; border-radius:6px; text-decoration:none; font-weight:bold; font-size:14px;">
+            📥 Download from Google Drive
+          </a>
+        </div>
+      </div>
+    </div>
+  `;
+    } else {
+      videoCards += `<div style="background:#fff3f3; color:#c00; padding:15px; border-radius:8px; border:1px solid #c00; margin:10px 0;">Failed: ${result.error}</div>`;
+    }
+  });
+
+  return `
+    <div style="font-family:'Roboto',Arial,sans-serif; max-width:750px; margin:0 auto; background:#f5f5f5; color:#000; padding:20px; border-radius:16px;">
+      <div style="background:#FF0000; padding:15px 20px; text-align:left; border-radius:12px 12px 0 0;">
+        <h1 style="margin:0; color:white; font-size:24px; font-weight:700; letter-spacing:1px;">
+          YouTube Bot <span style="font-weight:400; font-size:16px; margin-left:10px;">| Drive Links Ready</span>
+        </h1>
+      </div>
+      
+      <div style="padding:20px 20px 30px; background:white; border-radius:0 0 12px 12px; box-shadow:0 8px 15px rgba(0,0,0,0.05);">
+        <h2 style="color:#111; font-size:22px; margin-bottom:15px; border-bottom:2px solid #eee; padding-bottom:10px;">Your Videos on Google Drive</h2>
+        <p style="font-size:16px; color:#333; margin-bottom:20px;">
+          Your videos have been uploaded to Google Drive. Click the download buttons below to access them.
+        </p>
+        
+        <div>${videoCards}</div>
+
+        <hr style="border:0; border-top:1px dashed #ddd; margin:30px 0;">
+        <p style="color:#777; font-size:12px; text-align:center;">
+          Generated by the YouTube Bot Service. Files are stored in the "${getConstants().DRIVE_FOLDER_NAME}" folder in your Google Drive.
+        </p>
+      </div>
+    </div>
+  `;
+}
+
+function buildSearchResultsHtml(items, replyToEmail, query) {
+  let cards = "";
+
+  items.forEach(item => {
+    if (!item.id || !item.id.videoId) return;
+
+    const videoId = item.id.videoId;
+    const rawTitle = item.snippet.title.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const title = truncateTitle(rawTitle);
+    const thumb = item.snippet.thumbnails.high.url;
+    const channel = item.snippet.channelTitle.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const link = `https://youtu.be/${videoId}`;
+    
+    const viewCount = item.statistics?.viewCount ? Number(item.statistics.viewCount).toLocaleString() : 'N/A';
+    
+    let publishedDate = 'N/A';
+    if (item.snippet.publishedAt) {
+      publishedDate = Utilities.formatDate(new Date(item.snippet.publishedAt), "GMT", "MMM d, yyyy");
+    }
+    
+    const duration = item.contentDetails?.duration ? formatDuration(item.contentDetails.duration) : 'N/A';
+
+    const rawDescription = item.snippet.description.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const descriptionSnippet = rawDescription.length > 100 
+      ? rawDescription.substring(0, 100) + '...'
+      : rawDescription;
+
+    cards += `
+      <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="margin-bottom:15px; padding:15px; background:#fafafa; border-radius:10px; border:1px solid #eee;">
+        <tr>
+          <td valign="top" style="padding:0; width:160px; height:90px; padding-right:15px;">
+            <a href="${link}" style="text-decoration:none;">
+              <div style="width:160px; height:90px; overflow:hidden; border-radius:6px; position:relative;">
+                <img src="${thumb}" width="160" height="90" style="display:block; width:100%; height:100%; object-fit:cover;">
+                <div style="position:absolute; bottom:4px; right:4px; background:rgba(0,0,0,0.8); color:white; padding:2px 6px; border-radius:3px; font-size:11px; line-height:1.2;">${duration}</div>
+              </div>
+            </a>
+          </td>
+
+          <td valign="top" style="padding:0;">
+            <strong style="font-size:16px; color:#111; display:block; margin-bottom:4px; line-height:1.3;">${title}</strong>
+            
+            <small style="color:#606060; display:block; margin-bottom:4px;">
+              ${channel}
+            </small>
+            <small style="color:#888; display:block; margin-bottom:8px; font-size:12px;">
+              Duration: <strong>${duration}</strong> • Views: <strong>${viewCount}</strong> • Published: <strong>${publishedDate}</strong>
+            </small>
+
+            <p style="color:#555; font-size:13px; margin:0 0 12px 0; line-height:1.4;">
+              ${descriptionSnippet}
+            </p>
+
+            <table role="presentation" border="0" cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="padding:0; padding-right:12px;">
+                  <a href="mailto:${replyToEmail}?subject=bt&body=${encodeURIComponent(link)}"
+                     style="background:#ff0000; color:white; padding:9px 18px; border-radius:50px; text-decoration:none; font-weight:bold; font-size:14px; display:inline-block; box-shadow:0 2px 4px rgba(0,0,0,0.2);">
+                    <span style="font-size:16px; margin-right:5px; vertical-align:middle;">&#x2193;</span> Download
+                  </a>
+                </td>
+                <td style="padding:0;">
+                  <a href="${link}" style="color:#0d6efd; text-decoration:none; font-size:14px; font-weight:500;">
+                    View on YouTube
+                  </a>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>`;
+  });
+
+  return `<div style="font-family:'Roboto',Arial,sans-serif; max-width:750px; margin:20px auto; padding:0; background:white; border-radius:16px; box-shadow:0 4px 20px rgba(0,0,0,0.1);">
+            <div style="background:#FF0000; padding:15px 20px; margin:-20px -20px 20px -20px; border-radius:16px 16px 0 0;">
+              <h2 style="color:white; text-align:center; font-weight:700; margin:0;">Search Results</h2>
+            </div>
+            <div style="padding: 0 20px 20px 20px;">
+              <h3 style="color:#333; font-weight:500; margin-bottom:15px;">Top results for: <span style="font-weight:700;">"${query}"</span></h3>
+              <p style="font-size:14px; color:#555; margin-bottom:20px;">Click the <strong style="color:#ff0000;">Download</strong> button to request the video to be uploaded to Drive.</p>
+              <div style="padding:10px 0;">${cards}</div>
+            </div>
+          </div>`;
+}
+
+function sendHelpCard(message, userRole, roleLimits) {
+  const C = getConstants();
+
+  const displayDownloads = roleLimits.downloads === Infinity ? 'Unlimited' : roleLimits.downloads;
+  const displaySearches = roleLimits.searches === Infinity ? 'Unlimited' : roleLimits.searches;
+
+  const html = `
+    <div style="font-family:'Roboto',Arial,sans-serif; max-width:640px; margin:30px auto; padding:30px; background:linear-gradient(145deg, #FF0000 0%, #B20000 100%); color:white; border-radius:20px; text-align:center; box-shadow:0 15px 40px rgba(0,0,0,0.4);">
+      <h1 style="margin:0; font-size:36px; font-weight:700; letter-spacing:1px;">YouTube Bot</h1>
+      <p style="font-size:20px; margin:25px 0;">Your Smart Video Assistant (Google Drive Edition)</p>
+      
+      <div style="background:rgba(255,255,255,0.9); padding:25px; border-radius:15px; margin:30px 0; font-size:17px; line-height:1.8; color:#333; text-align:left;">
+        <strong style="color:#FF0000; font-size:18px; display:block; margin-bottom:15px; text-align:center;">How to use me (Just reply to this email):</strong>
+        <ul style="list-style:none; padding:0; margin:0;">
+          <li style="margin-bottom:10px; padding-left:25px; position:relative;">
+            <span style="position:absolute; left:0; color:#FF0000; font-size:20px;">&bull;</span> 
+            Paste **YouTube links** &rarr; I upload videos to Google Drive and send you the links.
+            <small style="color:#666; display:block; margin-top:3px;">Your Download Limit: <strong>${displayDownloads}</strong> per day.</small>
+          </li>
+          <li style="margin-bottom:10px; padding-left:25px; position:relative;">
+            <span style="position:absolute; left:0; color:#FF0000; font-size:20px;">&bull;</span> 
+            Type a **search query** (e.g., "new cat videos") &rarr; I send the top <strong>${roleLimits.maxResults}</strong> results.
+            <small style="color:#666; display:block; margin-top:3px;">Your Search Limit: <strong>${displaySearches}</strong> per day.</small>
+          </li>
+          <li style="margin-bottom:10px; padding-left:25px; position:relative;">
+            <span style="position:absolute; left:0; color:#FF0000; font-size:20px;">&bull;</span> 
+            Type <code style="background:#ddd; color:#333; padding:3px 8px; border-radius:4px; font-weight:bold;">info</code> or <code style="background:#ddd; color:#333; padding:3px 8px; border-radius:4px; font-weight:bold;">help</code> &rarr; see this guide.
+          </li>
+        </ul>
+        <strong style="display:block; margin-top:20px; padding-top:10px; border-top:1px solid #ccc; text-align:center;">
+          <span style="color:#FF0000;">Your Current Role: ${roleLimits.label} (${userRole})</span> | Videos are saved to your Google Drive in 360p MP4 format.
+        </strong>
+      </div>
+      <p style="font-size:14px; opacity:0.8; margin-top:20px;">Service Status: Online and Ready | Email subject: "bt"</p>
+    </div>`;
+
+  message.reply("How to use your YouTube Bot", { htmlBody: C.STYLE + html });
+}
