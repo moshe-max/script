@@ -5,7 +5,7 @@ function buildAddOn(e) {
   var lang = (e && e.parameters && e.parameters.lang) ? e.parameters.lang : 'en';
   var isHe = (lang === 'he');
   
-  var selectedAction = (e && e.formInput && e.formInput.action_type) ? e.formInput.action_type : 'draft';
+  var selectedAction = (e && e.formInput && e.formInput.action_type) ? e.formInput.action_type : 'self';
   var imageUrl = (e && e.formInput && e.formInput.image_url) ? e.formInput.image_url : '';
 
   var i18n = {
