@@ -12,8 +12,9 @@ const SENDER_EMAIL_ADDRESSES = [
 "yy0527644940@gmail.com",
 "mch8418460@gmail.com",
 "c0527134047@gmail.com", 
+"yyk43699@gmail.com",
 "grossmoshe07@gmail.com",
-
+"S0534156921@gmail.com",
 ];
 const LAST_PROCESSED_DATE_PROPERTY_KEY = 'lastProcessedDate'; // Key to store the last run date
 
