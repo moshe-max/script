@@ -4,11 +4,14 @@
 */
 function saveImageAttachmentsToDrive() {
 // --- Configuration ---
-const TARGET_FOLDER_NAME = "Saved Email Images"; // Name of the Google Drive folder to save images
+const TARGET_FOLDER_NAME = "SavedImages"; // Name of the Google Drive folder to save images
 const SENDER_EMAIL_ADDRESSES = [
-"sender1@example.com", // Replace with the actual email addresses
-"sender2@anotherdomain.com", // Add more email addresses as needed
-// "another_specific_sender@yourcompany.com"
+"israelk6755@gmail.com",
+"m0534120452@gmail.com",
+"esty.0545@gmail.com",
+"yy0527644940@gmail.com",
+"mch8418460@gmail.com",
+"c0527134047@gmail.com", 
 ];
 const LAST_PROCESSED_DATE_PROPERTY_KEY = 'lastProcessedDate'; // Key to store the last run date
 
