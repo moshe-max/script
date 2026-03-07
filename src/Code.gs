@@ -151,3 +151,10 @@ Logger.log('Error: ' + e.toString());
 Loger.log("Script Error", "An error occurred: " + e.message + "\nCheck the Apps Script 'Executions' or 'Logs' for details.", Browser.Buttons.OK);
 }
 }
+
+
+// to manuly reset the timer
+function resetcounter(){
+properties.setProperty(LAST_PROCESSED_DATE_PROPERTY_KEY, null);
+Logger.log('reseted the last processed date time to null);
+}
