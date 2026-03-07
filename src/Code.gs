@@ -141,14 +141,14 @@ properties.setProperty(LAST_PROCESSED_DATE_PROPERTY_KEY, currentRunDate.toISOStr
 Logger.log('Updated last processed date to: ' + currentRunDate.toISOString());
 
 if (savedCount > 0) {
-Loger.log("Script Complete", `Successfully saved ${savedCount} image attachments to "${TARGET_FOLDER_NAME}"!`, Browser.Buttons.OK);
+Logger.log("Script Complete", `Successfully saved ${savedCount} image attachments to "${TARGET_FOLDER_NAME}"!`, Browser.Buttons.OK);
 } else {
-Loger.log("Script Complete", `No new image attachments found from specified senders since last run.`, Browser.Buttons.OK);
+Logger.log("Script Complete", `No new image attachments found from specified senders since last run.`, Browser.Buttons.OK);
 }
 
 } catch (e) {
 Logger.log('Error: ' + e.toString());
-Loger.log("Script Error", "An error occurred: " + e.message + "\nCheck the Apps Script 'Executions' or 'Logs' for details.", Browser.Buttons.OK);
+Logger.log("Script Error", "An error occurred: " + e.message + "\nCheck the Apps Script 'Executions' or 'Logs' for details.", Browser.Buttons.OK);
 }
 }
 
