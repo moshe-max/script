@@ -12,6 +12,8 @@ const SENDER_EMAIL_ADDRESSES = [
 "yy0527644940@gmail.com",
 "mch8418460@gmail.com",
 "c0527134047@gmail.com", 
+"grossmoshe07@gmail.com",
+
 ];
 const LAST_PROCESSED_DATE_PROPERTY_KEY = 'lastProcessedDate'; // Key to store the last run date
 
@@ -19,7 +21,7 @@ const LAST_PROCESSED_DATE_PROPERTY_KEY = 'lastProcessedDate'; // Key to store th
 
 if (SENDER_EMAIL_ADDRESSES.length === 0) {
 Logger.log("ERROR: No sender email addresses configured. Please update SENDER_EMAIL_ADDRESSES array.");
-Browser.msgBox("Configuration Error", "Please update the 'SENDER_EMAIL_ADDRESSES' array in the script with valid email addresses.", Browser.Buttons.OK);
+Logger.log("Configuration Error", "Please update the 'SENDER_EMAIL_ADDRESSES' array in the script with valid email addresses.", Browser.Buttons.OK);
 return;
 }
 
@@ -138,13 +140,13 @@ properties.setProperty(LAST_PROCESSED_DATE_PROPERTY_KEY, currentRunDate.toISOStr
 Logger.log('Updated last processed date to: ' + currentRunDate.toISOString());
 
 if (savedCount > 0) {
-Browser.msgBox("Script Complete", `Successfully saved ${savedCount} image attachments to "${TARGET_FOLDER_NAME}"!`, Browser.Buttons.OK);
+Loger.log("Script Complete", `Successfully saved ${savedCount} image attachments to "${TARGET_FOLDER_NAME}"!`, Browser.Buttons.OK);
 } else {
-Browser.msgBox("Script Complete", `No new image attachments found from specified senders since last run.`, Browser.Buttons.OK);
+Loger.log("Script Complete", `No new image attachments found from specified senders since last run.`, Browser.Buttons.OK);
 }
 
 } catch (e) {
 Logger.log('Error: ' + e.toString());
-Browser.msgBox("Script Error", "An error occurred: " + e.message + "\nCheck the Apps Script 'Executions' or 'Logs' for details.", Browser.Buttons.OK);
+Loger.log("Script Error", "An error occurred: " + e.message + "\nCheck the Apps Script 'Executions' or 'Logs' for details.", Browser.Buttons.OK);
 }
 }
