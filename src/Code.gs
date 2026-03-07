@@ -155,6 +155,7 @@ Loger.log("Script Error", "An error occurred: " + e.message + "\nCheck the Apps 
 
 // to manuly reset the timer
 function resetcounter(){
+const LAST_PROCESSED_DATE_PROPERTY_KEY = 'lastProcessedDate'; 
 const properties = PropertiesService.getScriptProperties();    
 properties.setProperty(LAST_PROCESSED_DATE_PROPERTY_KEY, null);
 Logger.log('reseted the last processed date time to null');
