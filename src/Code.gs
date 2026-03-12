@@ -1,164 +1,84 @@
 /**
-* Saves image attachments from specific email addresses to a Google Drive folder.
-* Marks processed emails as read and only processes new emails since the last run.
-*/
-function saveImageAttachmentsToDrive() {
-// --- Configuration ---
-const TARGET_FOLDER_NAME = "SavedImages"; // Name of the Google Drive folder to save images
-const SENDER_EMAIL_ADDRESSES = [
-"israelk6755@gmail.com",
-"m0534120452@gmail.com",
-"esty.0545@gmail.com",
-"yy0527644940@gmail.com",
-"mch8418460@gmail.com",
-"c0527134047@gmail.com", 
-"yyk43699@gmail.com",
-"grossmoshe07@gmail.com",
-"S0534156921@gmail.com",
-];
-const LAST_PROCESSED_DATE_PROPERTY_KEY = 'lastProcessedDate'; // Key to store the last run date
+ * Automatically saves image attachments based on a Google Sheet config
+ * and logs the results back to the sheet.
+ */
+function saveImagesWithLogging() {
+  // --- CONFIGURATION ---
+  const SS_ID = "1mV4_7SZidjhlyTTB0U9qxc7M2L7Wi-XsBSOyQNkQeJI"; // <--- Put your Sheet ID here
+  const TARGET_FOLDER_NAME = "SavedImages";
+  const LAST_PROCESSED_KEY = 'lastProcessedDate';
+  
+  const ss = SpreadsheetApp.openById(SS_ID);
+  const configSheet = ss.getSheetByName("Config");
+  const logSheet = ss.getSheetByName("Log");
+  const properties = PropertiesService.getScriptProperties();
+  
+  // 1. Get Emails from Config Sheet
+  const emails = configSheet.getRange("A1:A" + configSheet.getLastRow()).getValues()
+                 .flat()
+                 .filter(email => email.includes("@"));
 
-// --- End Configuration ---
+  if (emails.length === 0) {
+    Logger.log("No email addresses found in Config sheet.");
+    return;
+  }
 
-if (SENDER_EMAIL_ADDRESSES.length === 0) {
-Logger.log("ERROR: No sender email addresses configured. Please update SENDER_EMAIL_ADDRESSES array.");
-Logger.log("Configuration Error", "Please update the 'SENDER_EMAIL_ADDRESSES' array in the script with valid email addresses.", Browser.Buttons.OK);
-return;
-}
+  // 2. Setup Folder
+  let folder;
+  const folders = DriveApp.getFoldersByName(TARGET_FOLDER_NAME);
+  folder = folders.hasNext() ? folders.next() : DriveApp.createFolder(TARGET_FOLDER_NAME);
 
-const properties = PropertiesService.getScriptProperties();
-let lastProcessedDateString = properties.getProperty(LAST_PROCESSED_DATE_PROPERTY_KEY);
-let currentRunDate = new Date(); // To be saved for the *next* run
+  // 3. Build Search Query
+  let lastRun = properties.getProperty(LAST_PROCESSED_KEY);
+  let query = `has:attachment (${emails.map(e => `from:${e}`).join(' OR ')})`;
+  
+  if (lastRun) {
+    let formattedDate = Utilities.formatDate(new Date(lastRun), Session.getScriptTimeZone(), 'yyyy/MM/dd');
+    query += ` after:${formattedDate}`;
+  } else {
+    query += ` is:unread`;
+  }
 
-// 1. Get or create the target Google Drive folder
-let targetFolder;
-const folders = DriveApp.getFoldersByName(TARGET_FOLDER_NAME);
-if (folders.hasNext()) {
-targetFolder = folders.next();
-Logger.log('Found existing folder: ' + TARGET_FOLDER_NAME + ' (ID: ' + targetFolder.getId() + ')');
-} else {
-targetFolder = DriveApp.createFolder(TARGET_FOLDER_NAME);
-Logger.log('Created new folder: ' + TARGET_FOLDER_NAME + ' (ID: ' + targetFolder.getId() + ')');
-}
+  // 4. Process Messages
+  const threads = GmailApp.search(query);
+  let savedCount = 0;
 
-// 2. Build the Gmail search query
-let searchQuery = 'has:attachment '; // Always look for attachments
+  threads.forEach(thread => {
+    thread.getMessages().forEach(message => {
+      // Only process if it's actually from one of our list (extra safety)
+      const sender = message.getFrom().toLowerCase();
+      if (!emails.some(e => sender.includes(e.toLowerCase()))) return;
 
-// Add sender filter
-const senderQueries = SENDER_EMAIL_ADDRESSES.map(email => `from:${email}`).join(' OR ');
-searchQuery += `(${senderQueries}) `;
+      const attachments = message.getAttachments();
+      let index = 1;
 
-// Add date filter to only process new emails
-if (lastProcessedDateString) {
-const lastProcessedDate = new Date(lastProcessedDateString);
-// Format date as YYYY/MM/DD for Gmail search
-const formattedDate = Utilities.formatDate(lastProcessedDate, Session.getScriptTimeZone(), 'yyyy/MM/dd');
-searchQuery += `after:${formattedDate} `;
-Logger.log('Searching for emails after: ' + formattedDate);
-} else {
-// If no last processed date, search for all unread emails from specified senders
-searchQuery += 'is:unread ';
-Logger.log('First run or no previous date, searching for unread emails from specified senders.');
-}
+      attachments.forEach(attachment => {
+        if (attachment.getContentType().startsWith('image/')) {
+          const timestamp = Utilities.formatDate(message.getDate(), Session.getScriptTimeZone(), 'yyyyMMdd_HHmm');
+          const uniqueName = `${timestamp}_${index}_${attachment.getName()}`;
+          
+          // Check for duplicates
+          if (!folder.getFilesByName(uniqueName).hasNext()) {
+            const file = folder.createFile(attachment.setName(uniqueName));
+            
+            // Log to Google Sheet
+            logSheet.appendRow([
+              new Date(), 
+              message.getFrom(), 
+              uniqueName, 
+              file.getUrl()
+            ]);
+            
+            savedCount++;
+            index++;
+          }
+        }
+      });
+      message.markRead();
+    });
+  });
 
-let savedCount = 0;
-const processedMessageIds = new Set(); // To ensure we mark messages read only once
-
-try {
-// 3. Search for Gmail threads
-Logger.log('Executing Gmail search query: "' + searchQuery + '"');
-const threads = GmailApp.search(searchQuery);
-
-if (threads.length === 0) {
-Logger.log('No new threads found matching the criteria.');
-return; // Exit if no threads found
-}
-
-Logger.log(`Found ${threads.length} threads matching the query.`);
-
-for (const thread of threads) {
-const messages = thread.getMessages();
-for (const message of messages) {
-// Skip messages already processed in this run (if multiple messages in same thread)
-if (processedMessageIds.has(message.getId())) {
-continue;
-}
-
-// Double-check sender (redundant if search query is perfect, but good for safety)
-const messageSender = message.getFrom();
-const isFromConfiguredSender = SENDER_EMAIL_ADDRESSES.some(
-configuredSender => messageSender.toLowerCase().includes(configuredSender.toLowerCase())
-);
-
-if (!isFromConfiguredSender) {
-Logger.log(`Skipping message from unconfigured sender: ${messageSender}`);
-continue;
-}
-
-const attachments = message.getAttachments();
-let attachmentsSavedInMessage = 0;
-
-for (const attachment of attachments) {
-// Check if the attachment is an image
-if (attachment.getContentType().startsWith('image/')) {
-const fileName = attachment.getName();
-// Create a more unique filename to avoid overwriting and provide context
-const timestamp = Utilities.formatDate(message.getDate(), Session.getScriptTimeZone(), 'yyyyMMdd_HHmmss');
-const uniqueFileName = `${timestamp}_${fileName}`;
-
-// Check if a file with this name already exists in the target folder to prevent duplicates
-// This is a basic check and won't detect content duplicates if filenames differ.
-// For a more robust duplicate check, you'd need to compare file hashes, which is more complex.
-const existingFiles = targetFolder.getFilesByName(uniqueFileName);
-if (existingFiles.hasNext()) {
-Logger.log(`Skipping existing file: ${uniqueFileName}`);
-continue;
-}
-
-targetFolder.createFile(attachment.setName(uniqueFileName));
-Logger.log(`Saved image: ${uniqueFileName} from "${message.getFrom()}" (Subject: "${message.getSubject()}")`);
-savedCount++;
-attachmentsSavedInMessage++;
-}
-}
-
-// Mark the message as read ONLY if it contained relevant attachments
-if (attachmentsSavedInMessage > 0) {
-message.markRead();
-processedMessageIds.add(message.getId());
-Logger.log(`Marked message as read: ${message.getSubject()}`);
-} else {
-// If no images were saved from this message, but it matched the sender,
-// we might want to mark it read anyway if we only care about images.
-// For now, only marking if images were found.
-Logger.log(`No image attachments found or saved in message: ${message.getSubject()}`);
-}
-}
-}
-
-// 4. Update the last processed date for the next run
-properties.setProperty(LAST_PROCESSED_DATE_PROPERTY_KEY, currentRunDate.toISOString());
-Logger.log('Updated last processed date to: ' + currentRunDate.toISOString());
-
-if (savedCount > 0) {
-Logger.log("Script Complete", `Successfully saved ${savedCount} image attachments to "${TARGET_FOLDER_NAME}"!`, Browser.Buttons.OK);
-} else {
-Logger.log("Script Complete", `No new image attachments found from specified senders since last run.`, Browser.Buttons.OK);
-}
-
-} catch (e) {
-Logger.log('Error: ' + e.toString());
-Logger.log("Script Error", "An error occurred: " + e.message + "\nCheck the Apps Script 'Executions' or 'Logs' for details.", Browser.Buttons.OK);
-}
-}
-
-
-// to manuly reset the timer
-function resetcounter() {
-const LAST_PROCESSED_DATE_PROPERTY_KEY = 'lastProcessedDate';
-const properties = PropertiesService.getScriptProperties();
-
-// Delete the property to remove its value
-properties.deleteProperty(LAST_PROCESSED_DATE_PROPERTY_KEY);
-Logger.log(`Deleted the '${LAST_PROCESSED_DATE_PROPERTY_KEY}' property.`);
+  // 5. Cleanup
+  properties.setProperty(LAST_PROCESSED_KEY, new Date().toISOString());
+  Logger.log(`Process complete. Saved ${savedCount} images.`);
 }
