@@ -1,9 +1,9 @@
 /**
- * Main function to save images and log them to a sheet.
+ * Saves images and logs: Date, Sender, Subject, Filename, and Link.
  */
 function saveImagesWithLogging() {
   // --- CONFIGURATION ---
-  const SS_ID = "1mV4_7SZidjhlyTTB0U9qxc7M2L7Wi-XsBSOyQNkQeJI"; // <--- Replace with the long ID from your Sheet URL
+  const SS_ID = "1mV4_7SZidjhlyTTB0U9qxc7M2L7Wi-XsBSOyQNkQeJI"; 
   const TARGET_FOLDER_NAME = "SavedImages";
   const LAST_PROCESSED_KEY = 'lastProcessedDate';
   
@@ -14,28 +14,20 @@ function saveImagesWithLogging() {
     const properties = PropertiesService.getScriptProperties();
 
     if (!configSheet || !logSheet) {
-      throw new Error("Could not find tabs named 'Config' or 'Log'. Please check your Sheet tab names.");
+      throw new Error("Could not find tabs named 'Config' or 'Log'.");
     }
 
     // 1. Get Emails from Config Sheet
     const lastRow = configSheet.getLastRow();
-    if (lastRow === 0) {
-      Logger.log("Config sheet is empty.");
-      return;
-    }
+    if (lastRow === 0) return;
+    
     const emails = configSheet.getRange("A1:A" + lastRow).getValues()
                    .flat()
                    .filter(email => email && email.includes("@"));
 
-    if (emails.length === 0) {
-      Logger.log("No valid email addresses found in Config sheet.");
-      return;
-    }
-
     // 2. Setup Folder
-    let folder;
     const folders = DriveApp.getFoldersByName(TARGET_FOLDER_NAME);
-    folder = folders.hasNext() ? folders.next() : DriveApp.createFolder(TARGET_FOLDER_NAME);
+    const folder = folders.hasNext() ? folders.next() : DriveApp.createFolder(TARGET_FOLDER_NAME);
 
     // 3. Build Search Query
     let lastRun = properties.getProperty(LAST_PROCESSED_KEY);
@@ -44,10 +36,8 @@ function saveImagesWithLogging() {
     if (lastRun) {
       let formattedDate = Utilities.formatDate(new Date(lastRun), Session.getScriptTimeZone(), 'yyyy/MM/dd');
       query += ` after:${formattedDate}`;
-      Logger.log("Searching for emails after: " + formattedDate);
     } else {
       query += ` is:unread`;
-      Logger.log("First run: Searching for unread emails.");
     }
 
     // 4. Process Messages
@@ -60,6 +50,7 @@ function saveImagesWithLogging() {
         if (!emails.some(e => sender.includes(e.toLowerCase()))) return;
 
         const attachments = message.getAttachments();
+        const subject = message.getSubject(); // <--- Get the Subject Line
         let index = 1;
 
         attachments.forEach(attachment => {
@@ -69,7 +60,16 @@ function saveImagesWithLogging() {
             
             if (!folder.getFilesByName(uniqueName).hasNext()) {
               const file = folder.createFile(attachment.setName(uniqueName));
-              logSheet.appendRow([new Date(), message.getFrom(), uniqueName, file.getUrl()]);
+              
+              // 5. Log with Subject Line
+              logSheet.appendRow([
+                new Date(), 
+                message.getFrom(), 
+                subject,          // <--- Added Subject here
+                uniqueName, 
+                file.getUrl()
+              ]);
+              
               savedCount++;
               index++;
             }
@@ -80,7 +80,7 @@ function saveImagesWithLogging() {
     });
 
     properties.setProperty(LAST_PROCESSED_KEY, new Date().toISOString());
-    Logger.log(`Process complete. Saved ${savedCount} images.`);
+    Logger.log(`Finished. Saved ${savedCount} images.`);
 
   } catch (e) {
     Logger.log("Error: " + e.message);
@@ -88,11 +88,9 @@ function saveImagesWithLogging() {
 }
 
 /**
- * RUN THIS MANUALLY TO RESET THE DATE
- * This will make the script look at all unread emails again.
+ * Run this to clear the "Last Run" memory.
  */
 function resetLastProcessedDate() {
-  const properties = PropertiesService.getScriptProperties();
-  properties.deleteProperty('lastProcessedDate');
-  Logger.log("The last processed date has been reset. The next run will scan all unread emails.");
+  PropertiesService.getScriptProperties().deleteProperty('lastProcessedDate');
+  Logger.log("Memory reset. Next run will scan all unread emails.");
 }
