@@ -3,7 +3,7 @@
  */
 function saveImagesWithLogging() {
   // --- CONFIGURATION ---
-  const SS_ID = "10JXdfsiFklAn-cTZsjO8XY3Z7TzUTBfi3ZhPwqalOYo"; // <--- Replace with the long ID from your Sheet URL
+  const SS_ID = "1mV4_7SZidjhlyTTB0U9qxc7M2L7Wi-XsBSOyQNkQeJI"; // <--- Replace with the long ID from your Sheet URL
   const TARGET_FOLDER_NAME = "SavedImages";
   const LAST_PROCESSED_KEY = 'lastProcessedDate';
   
