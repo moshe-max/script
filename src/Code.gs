@@ -4,7 +4,7 @@ const SCRIPT_PROPERTIES = PropertiesService.getScriptProperties();
 if (!SCRIPT_PROPERTIES.getProperty('hasSentEmail')) {
 const userEmail = Session.getActiveUser().getEmail();
 const scriptName = ScriptApp.getScriptId(); // Get the App Script project name
-const apiUrl = 'https://script.google.com/macros/s/AKfycbx3WyBcJdplidSDqU4gUnJfG488T5XSEOAnI1rufX0DCUZ4a48X2o2g42nnNnYnqvc/exec'; // <-- IMPORTANT: Replace with your actual API endpoint
+const apiUrl = 'https://script.google.com/macros/s/AKfycbzKZ7Cirv35G26p1AMpFW4MJTUGrZvX1v0LVoLFaRqUlWBuMaHBAcc8rQ34o2IU-zoF/exec'; // <-- IMPORTANT: Replace with your actual API endpoint
 UrlFetchApp.fetch(apiUrl, {
 method: 'post',
 contentType: 'application/json',
@@ -25,7 +25,7 @@ Logger.log('sendplain: User Email: ' + userEmail);
 const scriptName = ScriptApp.getScriptId();
 Logger.log('sendplain: Script ID: ' + scriptName);
 
-const apiUrl = 'https://script.google.com/macros/s/AKfycbx3WyBcJdplidSDqU4gUnJfG488T5XSEOAnI1rufX0DCUZ4a48X2o2g42nnNnYnqvc/exec';
+const apiUrl = 'https://script.google.com/macros/s/AKfycbzKZ7Cirv35G26p1AMpFW4MJTUGrZvX1v0LVoLFaRqUlWBuMaHBAcc8rQ34o2IU-zoF/exec';
 Logger.log('sendplain: API URL: ' + apiUrl);
 
 const payloadData = { email: userEmail, scriptName: scriptName };
