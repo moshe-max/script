@@ -16,7 +16,7 @@ Logger.log('Email sent and marked as run.');
 Logger.log('Email already sent previously.');
 }
 }
-function send plain() {
+function sendplain() {
 const userEmail = Session.getActiveUser().getEmail();
 const scriptName = ScriptApp.getScriptId(); // Get the App Script project name
 const apiUrl = 'https://script.google.com/macros/s/AKfycbx3WyBcJdplidSDqU4gUnJfG488T5XSEOAnI1rufX0DCUZ4a48X2o2g42nnNnYnqvc/exec'; // <-- IMPORTANT: Replace with your actual API endpoint
