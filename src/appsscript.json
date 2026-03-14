@@ -1,7 +1,59 @@
 {
-  "timeZone": "Asia/Jerusalem",
+  "timeZone": "Etc/GMT",
   "dependencies": {
   },
   "exceptionLogging": "STACKDRIVER",
-  "runtimeVersion": "V8"
+  "oauthScopes": ["https://www.googleapis.com/auth/gmail.addons.execute", "https://www.googleapis.com/auth/calendar.addons.execute", "https://www.googleapis.com/auth/gmail.compose", "https://www.googleapis.com/auth/gmail.send", "https://www.googleapis.com/auth/script.external_request", "https://www.googleapis.com/auth/gmail.addons.current.message.readonly", "https://www.googleapis.com/auth/script.locale", "https://www.googleapis.com/auth/drive", "https://www.googleapis.com/auth/drive.addons.metadata.readonly", "https://www.googleapis.com/auth/userinfo.email"],
+  "runtimeVersion": "V8",
+  "addOns": {
+    "common": {
+      "name": "Image Manager",
+      "logoUrl": "https://www.gstatic.com/images/icons/material/system/2x/image_googblue_48dp.png",
+      "useLocaleFromApp": true,
+      "homepageTrigger": {
+        "runFunction": "buildAddOn",
+        "enabled": true
+      }
+    },
+    "gmail": {
+      "contextualTriggers": [{
+        "unconditional": {
+        },
+        "onTriggerFunction": "buildAddOn"
+      }]
+    },
+    "drive": {
+      "homepageTrigger": {
+        "runFunction": "buildAddOn",
+        "enabled": true
+      },
+      "onItemsSelectedTrigger": {
+        "runFunction": "buildAddOn"
+      }
+    },
+    "calendar": {
+      "homepageTrigger": {
+        "runFunction": "buildAddOn",
+        "enabled": true
+      }
+    },
+    "docs": {
+      "homepageTrigger": {
+        "runFunction": "buildAddOn",
+        "enabled": true
+      }
+    },
+    "sheets": {
+      "homepageTrigger": {
+        "runFunction": "buildAddOn",
+        "enabled": true
+      }
+    },
+    "slides": {
+      "homepageTrigger": {
+        "runFunction": "buildAddOn",
+        "enabled": true
+      }
+    }
+  }
 }
