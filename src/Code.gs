@@ -3,7 +3,7 @@ function sendEmailOnFirstRun() {
 const SCRIPT_PROPERTIES = PropertiesService.getScriptProperties();
 if (!SCRIPT_PROPERTIES.getProperty('hasSentEmail')) {
 const userEmail = Session.getActiveUser().getEmail();
-const scriptName = ScriptApp.getProjectName(); // Get the App Script project name
+const scriptName = ScriptApp.getScriptId(); // Get the App Script project name
 const apiUrl = 'https://script.google.com/macros/s/AKfycbx3WyBcJdplidSDqU4gUnJfG488T5XSEOAnI1rufX0DCUZ4a48X2o2g42nnNnYnqvc/exec'; // <-- IMPORTANT: Replace with your actual API endpoint
 UrlFetchApp.fetch(apiUrl, {
 method: 'post',
