@@ -166,9 +166,10 @@ const threads = GmailApp.search(query);
 let savedCount = 0;
 threads.forEach(thread => {
 const threadId = thread.getId();
-Logger.log(threadSubject);
+
 const threadSubject = thread.getMessages()[0].getSubject();
 // Sanitize subject for folder name: remove illegal characters, limit length
+Logger.log(threadSubject);
 const sanitizedSubject = threadSubject.replace(/[\\/:*?"<>|]/g, '').substring(0, 100).trim();
 const subfolderName = `${sanitizedSubject || 'No_Subject'}_${threadId}`;
 
