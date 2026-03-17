@@ -167,7 +167,7 @@ let savedCount = 0;
 threads.forEach(thread => {
 const threadId = thread.getId();
 Logger.log(typeof thread + ' ' + (thread ? thread.constructor.name : 'N/A'));
-const threadSubject = thread.getSubject();
+const threadSubject = thread.getMessages()[0].getSubject();
 // Sanitize subject for folder name: remove illegal characters, limit length
 const sanitizedSubject = threadSubject.replace(/[\\/:*?"<>|]/g, '').substring(0, 100).trim();
 const subfolderName = `${sanitizedSubject || 'No_Subject'}_${threadId}`;
